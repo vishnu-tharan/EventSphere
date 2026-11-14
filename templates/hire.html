@@ -1,0 +1,15 @@
+{% extends 'base.html' %}{% block title %}Private hire{% endblock %}{% block content %}
+<h1 class="h2">Hire a venue</h1><p class="text-secondary">Get an immediate agent decision, price or alternatives. Groups above 70% capacity require admin approval.</p>
+<div class="row g-4"><div class="col-lg-5"><div class="card p-4"><h2 class="h5">New request</h2><form method="post" action="/hire"><input type="hidden" name="csrf" value="{{csrf}}">
+<label class="form-label">Venue</label><select class="form-select mb-3" name="venue_id" required>{% for venue in venues %}<option value="{{venue.id}}">{{venue.name}} ({{venue.capacity}} people, LKR {{venue.hourly_rate}}/hour)</option>{% endfor %}</select>
+<label class="form-label">Start time (Sri Lanka)</label><input class="form-control mb-3" type="datetime-local" name="start_at" required>
+<label class="form-label">End time (Sri Lanka)</label><input class="form-control mb-3" type="datetime-local" name="end_at" required>
+<label class="form-label">Purpose</label><input class="form-control mb-3" name="purpose" placeholder="Club meeting" required>
+<label class="form-label">Guest count</label><input class="form-control mb-3" type="number" min="1" name="guest_count" value="30" required>
+<button class="btn btn-dark w-100">Ask VenueAgent</button></form></div></div>
+<div class="col-lg-7"><h2 class="h5 mb-3">My requests</h2>
+{% for hire in hires %}<div class="card p-3 mb-3"><div class="d-flex justify-content-between gap-2"><b>#{{hire.id}} {{hire.venue.name}}</b><span class="badge text-bg-secondary">{{hire.status}}</span></div><div class="small mt-2">{{fmt(hire.start_at)}} — {{fmt(hire.end_at)}} | {{hire.guest_count}} guests</div><div class="small">{{hire.purpose}} | Price: LKR {{'%.2f'|format(hire.price)}}</div>
+{% if hire.status=='proposed' %}<p class="small mt-3 mb-2">Original slot is not available. VenueAgent suggests:</p>{% for proposal in json_loads(hire.alternatives_json) %}<form method="post" action="/hire/{{hire.id}}/accept/{{loop.index0}}" class="border rounded p-2 mb-2"><input type="hidden" name="csrf" value="{{csrf}}"><div class="small"><b>{{proposal.venue_name}}</b> | {{fmt_iso(proposal.start_at)}} to {{fmt_iso(proposal.end_at)}}</div><button class="btn btn-sm btn-outline-primary mt-2">Accept this alternative</button></form>{% endfor %}{% endif %}</div>
+{% else %}<p class="text-muted">No private-hire requests yet.</p>{% endfor %}
+</div></div>
+{% endblock %}

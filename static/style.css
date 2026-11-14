@@ -1,0 +1,17 @@
+:root{--navy:#17243c;--mint:#aef0ce;--bg:#f6f8fb}
+body{background:var(--bg);color:#1f2937;min-height:100vh}
+.site-wrap{max-width:1180px}
+.bg-navy{background:var(--navy)}
+.navbar-brand{letter-spacing:-.5px}
+.btn-mint{background:var(--mint);color:#123025;border:1px solid var(--mint);font-weight:700}
+.hero{background:linear-gradient(115deg,#162740,#305a61);color:white;border-radius:19px}
+.hero h1{max-width:700px;font-size:clamp(2rem,4vw,3.6rem);font-weight:800;letter-spacing:-.04em}
+.hero p{max-width:570px;color:#e4f0f2}
+.eyebrow{font-size:.8rem;letter-spacing:.18em;font-weight:800;color:#aef0ce;margin-bottom:14px}
+.card{border:1px solid #e2e8f0;border-radius:13px;box-shadow:0 1px 4px rgba(20,35,57,.04)}
+.event-card{overflow:hidden}.venue-img{height:165px;object-fit:cover}.event-placeholder{height:155px;background:linear-gradient(135deg,#e2eaf5,#c9eee3);display:grid;place-items:center;font-size:4.5rem;color:#246159}
+.category-pill{background:#ddf4e9;color:#236449;border-radius:999px;padding:4px 10px;font-size:.75rem;font-weight:800}
+.ticket-image{max-width:170px}.ticket-image img{max-width:100%;border:1px solid #e2e8f0;border-radius:7px;background:white}
+.code-small{word-break:break-all;font-size:.7rem}.log-table pre{white-space:pre-wrap;word-break:break-word;max-width:480px}
+.log-table td{max-width:480px}.form-label{font-weight:600}
+@media(max-width:375px){.hero{padding:22px!important}.site-wrap{padding-left:12px;padding-right:12px}.hero h1{font-size:1.9rem}}

@@ -1,0 +1,19 @@
+{% extends 'base.html' %}{% block title %}Notifications{% endblock %}
+{% block content %}
+<h1 class="h2">Notifications</h1>
+{% for offer in offers %}<div class="alert alert-warning"><b>Active waitlist hold!</b> Category: {{offer.category.name}}, quantity: {{offer.quantity}}.<br>Expires (local): {{fmt(offer.expires_at)}}. <b>Time left: <span class="hold-countdown" data-expiry="{{offer.expires_at.isoformat()}}Z">calculating...</span></b>. <a href="/events/{{offer.category.event_id}}">Go to event to claim your hold</a></div>{% endfor %}
+{% for item in notifications %}<div class="card p-3 mb-2"><p class="mb-1">{{item.message}}</p><div class="small text-muted">{{fmt(item.created_at)}}</div></div>{% else %}<p class="text-muted">No notifications yet.</p>{% endfor %}
+{% endblock %}
+{% block scripts %}<script>
+function updateHoldCountdowns() {
+  document.querySelectorAll('.hold-countdown').forEach(function(element) {
+    var milliseconds = new Date(element.dataset.expiry).getTime() - Date.now();
+    var total = Math.max(0, Math.ceil(milliseconds / 1000));
+    var minutes = Math.floor(total / 60);
+    var seconds = String(total % 60).padStart(2, '0');
+    element.textContent = total === 0 ? 'Expired (refresh this page)' : minutes + ':' + seconds;
+  });
+}
+updateHoldCountdowns();
+setInterval(updateHoldCountdowns, 1000);
+</script>{% endblock %}

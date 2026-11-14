@@ -1,0 +1,27 @@
+{% extends 'base.html' %}{% block title %}{{event.title}} - EventSphere{% endblock %}
+{% block content %}
+<a href="/" class="small">← All events</a>
+<div class="row g-4 mt-1"><div class="col-lg-7">
+<div class="card p-4"><span class="category-pill align-self-start">{{event.category}}</span><h1 class="mt-3">{{event.title}}</h1><p>{{event.description}}</p><p class="mb-1"><b>Venue:</b> {{event.venue.name}}, {{event.venue.location}}</p><p class="mb-1"><b>Starts:</b> {{fmt(event.start_at)}}</p><p class="mb-1"><b>Ends:</b> {{fmt(event.end_at)}}</p><p class="text-muted small mt-3">Capacity: {{event.venue.capacity}} people</p></div>
+</div><div class="col-lg-5"><h2 class="h4">Choose tickets</h2>
+{% for cat in event.ticket_categories %}
+{% set hold = holds.get(cat.id) %}
+<div class="card p-3 mb-3"><div class="d-flex justify-content-between"><div><b>{{cat.name}}</b><div class="small text-muted">{{cat.remaining}} / {{cat.quantity}} left</div></div><b>LKR {{'%.2f'|format(cat.price)}}</b></div>
+{% if user and user.role=='attendee' and event.start_at>now %}
+{% if hold %}
+<form method="post" action="/book/{{cat.id}}" class="mt-3">
+  <input type="hidden" name="csrf" value="{{csrf}}">
+  <input type="hidden" name="quantity" value="{{hold.quantity}}">
+  <input type="hidden" name="hold_id" value="{{hold.id}}">
+  <p class="small mb-2">Your hold expires at {{fmt(hold.expires_at)}}.</p>
+  <button class="btn btn-dark w-100">Claim {{hold.quantity}} held ticket(s)</button>
+</form>
+{% else %}
+<form method="post" action="/book/{{cat.id}}" class="d-flex gap-2 mt-3"><input type="hidden" name="csrf" value="{{csrf}}"><input type="number" class="form-control" name="quantity" min="1" max="6" value="1" aria-label="Number of tickets" style="max-width:95px"><button class="btn btn-dark flex-grow-1" {% if cat.remaining==0 %}disabled{% endif %}>Book (demo payment)</button></form>
+<form method="post" action="/waitlist/{{cat.id}}" class="d-flex gap-2 mt-2"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="quantity" value="1"><button class="btn btn-outline-secondary w-100">Join waitlist (1 ticket)</button></form>
+{% endif %}
+{% elif not user %}<a class="btn btn-dark mt-3" href="/login">Sign in to book</a>{% else %}<div class="text-muted small mt-2">Booking is closed for this event.</div>{% endif %}
+</div>
+{% endfor %}
+</div></div>
+{% endblock %}
