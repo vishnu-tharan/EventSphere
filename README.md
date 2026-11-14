@@ -1,8 +1,8 @@
-# EventSphere – IT4123 ICA 02
+# EventSphere
 
-A runnable educational multi-agent venue booking and digital ticketing website. The backend is **Python 3.11+ / FastAPI**, with **SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, Jinja/Bootstrap/JavaScript**, five JSON-message agents, simulated payments, QR code entry and timed waitlist offers.
+EventSphere manages venue hire, event ticketing, waitlists, and QR check-in. It uses **Python 3.11+ / FastAPI**, SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, and Jinja, Bootstrap, and JavaScript.
 
-This is project source code and an instructional demo, **not a deployed submission**. You must run, understand, test and deploy it, and include your own screenshots and real links in the report.
+Payments and refunds are simulated. Each successful booking records a payment reference and issues tickets without charging money or collecting card details.
 
 ## Quickest Windows method
 
@@ -17,7 +17,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python seed.py
+python seed.py --sample-data
 python -m uvicorn main:app --reload
 ```
 
@@ -25,15 +25,15 @@ If `py -3.11` is unavailable but Python 3.11+ is installed as `python`, replace 
 
 Open <http://127.0.0.1:8000>. FastAPI API documentation: <http://127.0.0.1:8000/docs>. Stop the server with `Ctrl+C`.
 
-### Demo accounts (LOCAL ONLY)
+### Initial accounts
 
-| Role | Email | Default LOCAL demonstration password |
-|---|---|---|
-| Admin | `admin@eventsphere.test` | `AdminDemo!2026` |
-| Staff | `staff@eventsphere.test` | `StaffDemo!2026` |
-| Attendee | `attendee@eventsphere.test` | `StudentDemo!2026` |
+| Role | Email |
+|---|---|
+| Admin | `admin@eventsphere.test` |
+| Staff | `staff@eventsphere.test` |
+| Attendee | `attendee@eventsphere.test` |
 
-The demo passwords are public examples, **not production credentials**. On Render set `DEMO_ADMIN_PASSWORD`, `DEMO_STAFF_PASSWORD`, `DEMO_ATTENDEE_PASSWORD` to new, strong unique passwords before setting `SEED_DEMO=1`. These are credentials for demo-only users; never use real passwords or payment details here. `seed.py` does not overwrite existing users' passwords: change the environment variables **before the database is seeded for the first time**.
+Local setup prompts for a password for each new account. You can also supply the initial passwords through environment variables. Existing accounts keep their current passwords. Run `python seed.py` without the optional `--sample-data` flag to create accounts only.
 
 ## Tests
 
@@ -52,21 +52,21 @@ There are **26 tests** covering the agents, concurrency, QR issuance and check-i
 | `models.py` | Relational database tables (persistent state) |
 | `database.py` | SQLite local, PostgreSQL production connection |
 | `security.py` | PBKDF2 hashed passwords, verification |
-| `seed.py` | Create demonstration users, venues and two events |
+| `seed.py` | Create initial accounts and optional sample venues and events |
 | `templates/` | HTML pages for attendees, staff, admin |
 | `static/style.css` | Responsive design, 375px support |
 | `tests/` | Pytest suite |
 | `render.yaml` | Render Blueprint (FastAPI app + PostgreSQL) |
 | `.env.example` | Sample environment-variable names; not loaded automatically |
 
-## Demonstration flows
+## User workflows
 
 1. **Admin:** Login, create/edit venue, create event (draft → publish), confirm conflict is refused, view dashboard/messages, approve hire.
 2. **Attendee:** Search/filter events, book Standard or VIP tickets, view per-ticket QR, payment reference, cancellation/refund, join waitlist and private hire.
 3. **Staff:** Open `/staff/scanner`, select event, scan phone QR or manually type code; test double scan and wrong event.
 4. **Waitlist timer:** Sell out category, join queue, cancel someone's booking, see held seat/notification, wait 5 minutes; background sweep runs every 30 seconds to re-offer.
 
-The demo seed includes `Live QR Check-in Demo` starting around **one hour after first seed**. Book one of its tickets *before* its start time, then the gate staff can scan it (scanner window opens two hours before event). If the demo has become stale, use an admin account to create a **new future event starting in one hour**; you cannot book an event that has already begun.
+To verify booking and check-in together, create an event starting in one hour. Book a ticket before it starts. Staff can scan it as soon as the check-in window opens, two hours before the event starts.
 
 ## Documented rules (must explain in viva)
 
@@ -82,8 +82,8 @@ Each exchanged message logs sender, receiver, performative, JSON content, conver
 
 1. Push this project to a **GitHub repository** without `.venv/`, `.env` or local `.db` files. `.gitignore` handles those.
 2. Sign into Render; choose **New → Blueprint**, connect your GitHub repository, and use the included `render.yaml` to provision one web service and one PostgreSQL database. If Render cannot offer the requested free tier, choose an available supported plan/provider; fees and availability may change.
-3. In the Render web service's **Environment**, set `SEED_DEMO=1` and three new strong passwords: `DEMO_ADMIN_PASSWORD`, `DEMO_STAFF_PASSWORD`, `DEMO_ATTENDEE_PASSWORD`. `SECRET_KEY` is generated by the Blueprint. Confirm `COOKIE_SECURE=true`, `APP_TIMEZONE=Asia/Colombo`, and that `DATABASE_URL` points to the provisioned PostgreSQL database.
-4. Render's start command: `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`. Build command: `pip install -r requirements.txt`. Single worker is intentional for this educational embedded scheduler.
+3. In the Render web service's **Environment**, set `SETUP_ACCOUNTS=1` and choose strong, unique passwords for `INITIAL_ADMIN_PASSWORD`, `INITIAL_STAFF_PASSWORD`, and `INITIAL_ATTENDEE_PASSWORD`. Save and deploy. The Blueprint generates `SECRET_KEY`, enables secure cookies, sets `APP_TIMEZONE=Asia/Colombo`, and links `DATABASE_URL` to PostgreSQL. Set `SEED_SAMPLE_DATA=1` only if you want sample venues and events on a fresh deployment.
+4. The Blueprint runs `pip install -r requirements.txt` and starts Uvicorn with one worker so there is one waitlist scheduler.
 5. Open Render's live `https://...onrender.com` URL; verify `/healthz`, login, venue/event creation, booking, QR check-in and `/admin` traces. Camera scanning uses HTTPS (localhost also works). A background worker/celery would be better in larger production systems.
 6. Do **not** put a SQLite URL in Render: ephemeral filesystem is not durable. Use the PostgreSQL `DATABASE_URL` linked by the Blueprint.
 7. Be mindful of free service sleeps and free Postgres lifetime; open the site and test it **before your viva**.
@@ -91,11 +91,8 @@ Each exchanged message logs sender, receiver, performative, JSON content, conver
 
 Render's published FastAPI deployment guide: <https://render.com/docs/deploy-fastapi>.
 
-## Known scope / education constraints
+## Deployment details
 
-- Email delivery is not implemented: user notifications appear inside the website. The assignment marks email as **optional**.
-- Payments and refunds are simulation only: no real card data is collected.
+- Notifications appear inside the website.
 - The browser QR scanner needs `html5-qrcode` loaded from an external CDN and camera permission. **Manual entry fallback** works even if the library fails to load.
 - The sample venue image is an external URL entered by an admin; a built-in gradient placeholder is shown if no image is supplied.
-- This is a functional educational prototype, not audited production software; use single web worker and do not treat it as a financial system.
-- No real live host, GitHub repository or personal screenshots are generated by merely extracting this ZIP. Those require your own accounts and deployment actions.

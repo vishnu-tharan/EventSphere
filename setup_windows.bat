@@ -17,10 +17,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo STEP 3: Creating local demo users and events...
-python seed.py
+echo STEP 3: Creating local accounts and sample events...
+python seed.py --sample-data
 if errorlevel 1 (
-  echo ERROR: Demo seed failed.
+  echo ERROR: Initial data setup failed.
   pause
   exit /b 1
 )

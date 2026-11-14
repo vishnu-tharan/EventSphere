@@ -111,13 +111,15 @@ async def lifespan(app: FastAPI):
     if os.getenv('RENDER') and SECRET_KEY == 'LOCAL-ONLY-CHANGE-ME':
         raise RuntimeError('Set a strong SECRET_KEY environment variable on Render')
     Base.metadata.create_all(bind=engine)
-    if os.getenv('SEED_DEMO', '').strip() == '1':
-        if os.getenv('RENDER') and not all(os.getenv(k) for k in (
-                'DEMO_ADMIN_PASSWORD','DEMO_STAFF_PASSWORD','DEMO_ATTENDEE_PASSWORD')):
-            raise RuntimeError('Set all three DEMO_*_PASSWORD environment variables on Render')
-        from seed import seed
-        with SessionLocal() as db:
-            seed(db)
+    from seed import seed, update_seed_labels
+    # Honor the previous setup setting on existing deployments.
+    setup_accounts = os.getenv('SETUP_ACCOUNTS', os.getenv('SEED_DEMO', '')).strip() == '1'
+    with SessionLocal() as db:
+        if setup_accounts:
+            seed(db, sample_data=os.getenv('SEED_SAMPLE_DATA', '').strip() == '1')
+        else:
+            update_seed_labels(db)
+            db.commit()
     task = asyncio.create_task(waitlist_loop())
     yield
     task.cancel()
