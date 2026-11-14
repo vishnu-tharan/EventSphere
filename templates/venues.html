@@ -1,4 +1,4 @@
 {% extends 'base.html' %}{% block title %}Admin venues{% endblock %}{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4"><h1 class="h2">Venue management</h1><a href="/admin/venues/new" class="btn btn-dark">+ Create venue</a></div>
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4"><h1 class="h2">Venue management</h1><a href="/admin/venues/new" class="btn btn-dark">Create venue</a></div>
 <div class="row g-3">{% for venue in venues %}<div class="col-md-6"><div class="card p-3 h-100"><h2 class="h5">{{venue.name}}</h2><p>{{venue.description}}</p><div class="small text-muted">{{venue.location}} | {{venue.capacity}} seats</div><div class="small mb-3">LKR {{venue.hourly_rate}} / hr | Private hire: {{'Open' if venue.hire_open else 'Closed'}}</div><a class="btn btn-outline-dark mt-auto" href="/admin/venues/{{venue.id}}/edit">Edit venue</a></div></div>{% endfor %}</div>
 {% endblock %}
