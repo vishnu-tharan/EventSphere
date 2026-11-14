@@ -1,7 +1,6 @@
 """Five real agents using JSON message passing, persistent DB state, and decision rules.
 
-Rules are deliberately explicit for the viva. An agent invokes bus.send() to
-communicate; it never directly calls another agent's handle method.
+Agents exchange messages through the message bus.
 """
 import json
 import math

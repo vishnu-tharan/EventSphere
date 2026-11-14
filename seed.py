@@ -64,6 +64,12 @@ def update_seed_labels(db):
     for event in concerts:
         event.description = 'Campus concert with Standard and VIP tickets'
     localize_sample_venues(db)
+    venues = db.scalars(select(Venue).where(
+        Venue.location == CAMPUS_LOCATION,
+        Venue.name.in_([TECHNOLOGY_HALL, APPLIED_SCIENCE_HALL, BUSINESS_STUDIES_HALL]),
+        Venue.description == 'Capacity and hire rate are sample values for this coursework project.'))
+    for venue in venues:
+        venue.description = 'Capacity and hire rate are illustrative.'
 
 
 def seed(db, *, sample_data=False, prompt=False):
@@ -107,7 +113,7 @@ def add_sample_data(db):
     )
     for venue_name, capacity, rate, title, category, description, starts_in, tickets in listings:
         venue = Venue(name=venue_name, location=CAMPUS_LOCATION, capacity=capacity, hourly_rate=rate,
-                      hire_open=True, description='Capacity and hire rate are sample values for this coursework project.')
+                      hire_open=True, description='Capacity and hire rate are illustrative.')
         start = instant + starts_in
         event = Event(venue=venue, title=title, category=category, description=description, status='published',
                       start_at=start, end_at=start + timedelta(hours=2))

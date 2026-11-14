@@ -1,4 +1,4 @@
-"""Meaningful ICA02 tests: 5 agents, overbooking, double scan, refund, persistence."""
+"""Tests for agent decisions, inventory, check-in, refunds, and persistence."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier

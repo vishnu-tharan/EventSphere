@@ -1,6 +1,6 @@
 # EventSphere
 
-EventSphere is an independent coursework project set at the University of Vavuniya. It manages campus venue hire, event ticketing, waitlists, and QR check-in. It uses **Python 3.11+ / FastAPI**, SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, and Jinja, Bootstrap, and JavaScript.
+EventSphere manages campus venue hire, event ticketing, waitlists, and QR check-in in a University of Vavuniya setting. It uses **Python 3.11+ / FastAPI**, SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, and Jinja, Bootstrap, and JavaScript.
 
 Payments and refunds are simulated. Each successful booking records a payment reference and issues tickets without charging money or collecting card details.
 
@@ -70,7 +70,7 @@ There are **26 tests** covering the agents, concurrency, QR issuance and check-i
 
 To verify booking and check-in together, create an event starting in one hour. Book a ticket before it starts. Staff can scan it as soon as the check-in window opens, two hours before the event starts.
 
-## Documented rules (must explain in viva)
+## Agent decision rules
 
 - **VenueAgent:** Checks ticket totals against current capacity before publishing. Uses a 30-minute gap between venue activities and proposes the earliest suitable slot in each eligible venue, up to three options. It calculates `hours × hourly_rate` and adds 20% on weekends (Asia/Colombo date). Requests above 70% capacity go to admin for approval.
 - **BookingAgent:** At most 6 tickets per booking for a published event before its start. A conditional SQL update takes public stock only if enough remains. Booking, waitlist expiry, and cancellation lock the same event while changing its inventory. Payments use a `SIM-...` reference. Refunds are 100% at least 48 hours ahead, 50% from 24 to less than 48 hours, and 0% under 24 hours. Cancelling an event refunds all paid bookings in full.
@@ -86,10 +86,7 @@ Each exchanged message logs sender, receiver, performative, JSON content, conver
 2. Sign into Render; choose **New → Blueprint**, connect your GitHub repository, and use the included `render.yaml` to provision one web service and one PostgreSQL database. If Render cannot offer the requested free tier, choose an available supported plan/provider; fees and availability may change.
 3. In the Render web service's **Environment**, set `SETUP_ACCOUNTS=1` and choose strong, unique passwords for `INITIAL_ADMIN_PASSWORD`, `INITIAL_STAFF_PASSWORD`, and `INITIAL_ATTENDEE_PASSWORD`. Save and deploy. The Blueprint generates `SECRET_KEY`, enables secure cookies, sets `APP_TIMEZONE=Asia/Colombo`, and links `DATABASE_URL` to PostgreSQL. Set `SEED_SAMPLE_DATA=1` only if you want sample venues and events on a fresh deployment.
 4. The Blueprint runs `pip install -r requirements.txt` and starts Uvicorn with one worker so there is one waitlist scheduler.
-5. Open Render's live `https://...onrender.com` URL; verify `/healthz`, login, venue/event creation, booking, QR check-in and `/admin` traces. Camera scanning uses HTTPS (localhost also works). A background worker/celery would be better in larger production systems.
-6. Do **not** put a SQLite URL in Render: ephemeral filesystem is not durable. Use the PostgreSQL `DATABASE_URL` linked by the Blueprint.
-7. Be mindful of free service sleeps and free Postgres lifetime; open the site and test it **before your viva**.
-8. Include the real live URL and GitHub URL, filled-in report and local setup/test instructions in the final PDF.
+5. Open the live HTTPS URL and verify `/healthz`, sign-in, venue and event creation, booking, QR check-in, and the agent log in `/admin`.
 
 Render's published FastAPI deployment guide: <https://render.com/docs/deploy-fastapi>.
 
@@ -97,4 +94,4 @@ Render's published FastAPI deployment guide: <https://render.com/docs/deploy-fas
 
 - Notifications appear inside the website.
 - The browser QR scanner needs `html5-qrcode` loaded from an external CDN and camera permission. **Manual entry fallback** works even if the library fails to load.
-- The sample venue image is an external URL entered by an admin; a built-in gradient placeholder is shown if no image is supplied.
+- Admins can supply an optional image URL for a venue.
