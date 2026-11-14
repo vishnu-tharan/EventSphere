@@ -1,22 +1,47 @@
 {% extends 'base.html' %}{% block title %}Find events - EventSphere{% endblock %}
 {% block content %}
-<div class="hero p-4 p-lg-5 mb-4">
+<section class="hero">
   <h1>University of Vavuniya Events &amp; Venue Booking</h1>
-  <p>Browse sample campus workshops, seminars, and student events in Pampaimadu, Vavuniya. Book a ticket or request a venue for a campus activity.</p>
-  <a class="btn btn-mint" href="/hire">Explore private venue hire</a>
-</div>
-<form class="row g-2 mb-4" method="get" action="/">
-  <div class="col-12 col-md-7"><input class="form-control" name="q" placeholder="Search event names and descriptions" value="{{q}}"></div>
-  <div class="col-8 col-md-3"><select class="form-select" name="category"><option value="">All categories</option>{% for cat in categories %}<option value="{{cat}}" {% if category==cat %}selected{% endif %}>{{cat}}</option>{% endfor %}</select></div>
-  <div class="col-4 col-md-2"><button class="btn btn-dark w-100">Search</button></div>
-</form>
-<h2 class="h4 mb-3">Upcoming & live events</h2>
-<div class="row g-3">
-{% for event in events %}
-<div class="col-12 col-md-6 col-xl-4"><div class="card event-card h-100">
-{% if event.venue.image_url %}<img src="{{event.venue.image_url}}" class="card-img-top venue-img" alt="{{event.venue.name}}">{% else %}<div class="event-placeholder">✦</div>{% endif %}
-<div class="card-body"><span class="small category-pill">{{event.category}}</span><h3 class="h5 mt-2">{{event.title}}</h3><div class="small text-muted mb-2">📍 {{event.venue.name}} · {{event.venue.location}}</div><div class="small mb-3">🗓 {{fmt(event.start_at)}}</div>
-<a href="/events/{{event.id}}" class="btn btn-outline-dark">View tickets</a></div></div></div>
-{% else %}<p class="text-muted">No published events match your search.</p>{% endfor %}
-</div>
+  <p>Browse sample campus events in Pampaimadu, Vavuniya. Book a ticket or request a venue for a campus activity.</p>
+  <div class="hero-actions">
+    <a class="btn btn-gold" href="#events">Browse events</a>
+    <a class="btn btn-outline-light" href="/hire">Request a venue</a>
+  </div>
+</section>
+<section id="events" class="event-list" aria-labelledby="events-title">
+  <h2 id="events-title">Campus events</h2>
+  <form class="event-search" method="get" action="/#events" role="search" aria-label="Find campus events">
+    <div>
+      <label class="form-label" for="event-query">Search events</label>
+      <input class="form-control" id="event-query" type="search" name="q" placeholder="Event title or keyword" value="{{q}}">
+    </div>
+    <div>
+      <label class="form-label" for="event-category">Category</label>
+      <select class="form-select" id="event-category" name="category">
+        <option value="">All categories</option>
+        {% for cat in categories %}<option value="{{cat}}" {% if category==cat %}selected{% endif %}>{{cat}}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-dark">Search</button>
+  </form>
+  <div class="event-grid">
+    {% for event in events %}
+    <article class="card event-card">
+      {% if event.venue.image_url %}<img src="{{event.venue.image_url}}" class="card-img-top venue-img" alt="{{event.venue.name}}" loading="lazy">{% endif %}
+      <div class="card-body">
+        <span class="category-pill">{{event.category}}</span>
+        <h3 class="h5">{{event.title}}</h3>
+        <p class="event-time">{{fmt(event.start_at)}}</p>
+        <p class="event-venue">{{event.venue.name}}<br>{{event.venue.location}}</p>
+        <a href="/events/{{event.id}}" class="btn btn-outline-dark mt-auto">View tickets<span class="visually-hidden"> for {{event.title}}</span></a>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-events">
+      <p>No published events match your search.</p>
+      {% if q or category %}<a href="/#events">Clear search and filters</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
 {% endblock %}
