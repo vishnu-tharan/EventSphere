@@ -1,8 +1,10 @@
 # EventSphere
 
-EventSphere manages venue hire, event ticketing, waitlists, and QR check-in. It uses **Python 3.11+ / FastAPI**, SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, and Jinja, Bootstrap, and JavaScript.
+EventSphere is an independent coursework project set at the University of Vavuniya. It manages campus venue hire, event ticketing, waitlists, and QR check-in. It uses **Python 3.11+ / FastAPI**, SQLAlchemy, Pydantic, PostgreSQL on Render, SQLite locally, and Jinja, Bootstrap, and JavaScript.
 
 Payments and refunds are simulated. Each successful booking records a payment reference and issues tickets without charging money or collecting card details.
+
+The sample listings use venue names from published [University of Vavuniya](https://www.vau.ac.lk/workshop-on-university-research-grants-and-associated-procedures/), [Faculty of Technological Studies](https://fts.vau.ac.lk/index.php/workshops/), and [Faculty of Business Studies](https://www.vau.ac.lk/workshop-on-communication-skills-2023/) event notices. Dates, capacities, ticket quantities, and hire rates are sample values.
 
 ## Quickest Windows method
 

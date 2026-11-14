@@ -8,6 +8,40 @@ from database import Base, SessionLocal, engine
 from models import User,Venue,Event,TicketCategory,now_utc
 from security import hash_password
 
+CAMPUS_LOCATION = 'Pampaimadu, Vavuniya, Sri Lanka'
+TECHNOLOGY_HALL = 'TLH2, Faculty of Technological Studies'
+APPLIED_SCIENCE_HALL = 'Smart Lecture Hall, Faculty of Applied Science'
+BUSINESS_STUDIES_HALL = 'LH 6 Hall, Faculty of Business Studies'
+ORIENTATION_DESCRIPTION = 'Sample orientation listing for incoming students at the Faculty of Technological Studies.'
+ICT_WORKSHOP_DESCRIPTION = 'Sample hands-on workshop on campus computing and software development.'
+
+
+def localize_sample_venues(db):
+    """Update the original sample listings while preserving their bookings and dates."""
+    auditorium = db.scalar(select(Venue).where(
+        Venue.name == 'University Main Auditorium', Venue.location == 'Colombo Campus',
+        Venue.description == 'Large indoor hall for concerts and conferences'))
+    if auditorium is not None:
+        auditorium.name = TECHNOLOGY_HALL
+        auditorium.location = CAMPUS_LOCATION
+        auditorium.description = 'Faculty of Technological Studies lecture hall. Capacity and hire rate are sample values.'
+        for event in db.scalars(select(Event).where(Event.venue_id == auditorium.id)):
+            if event.title == 'Campus Music Night' and event.description == 'Campus concert with Standard and VIP tickets':
+                event.title = 'Freshers’ Orientation'
+                event.category = 'Other'
+                event.description = ORIENTATION_DESCRIPTION
+            elif event.title == 'QR Check-in Workshop' and event.description == 'Workshop with QR ticket check-in':
+                event.title = 'ICT Skills Workshop'
+                event.description = ICT_WORKSHOP_DESCRIPTION
+
+    seminar_room = db.scalar(select(Venue).where(
+        Venue.name == 'Innovation Seminar Room', Venue.location == 'Block B, Floor 2',
+        Venue.description == 'Classroom and seminar venue'))
+    if seminar_room is not None:
+        seminar_room.name = APPLIED_SCIENCE_HALL
+        seminar_room.location = CAMPUS_LOCATION
+        seminar_room.description = 'Faculty of Applied Science lecture hall. Capacity and hire rate are sample values.'
+
 
 def update_seed_labels(db):
     """Update labels created by earlier versions while preserving records and passwords."""
@@ -29,6 +63,7 @@ def update_seed_labels(db):
         Event.description == 'Demo concert with Standard and VIP tickets')).all()
     for event in concerts:
         event.description = 'Campus concert with Standard and VIP tickets'
+    localize_sample_venues(db)
 
 
 def seed(db, *, sample_data=False, prompt=False):
@@ -61,31 +96,22 @@ def seed(db, *, sample_data=False, prompt=False):
 def add_sample_data(db):
     if db.scalar(select(Venue.id).limit(1)) is not None:
         return
-    auditorium = Venue(name='University Main Auditorium', location='Colombo Campus', capacity=300,
-                       description='Large indoor hall for concerts and conferences',
-                       hourly_rate=8000, hire_open=True)
-    db.add_all([
-        auditorium,
-        Venue(name='Innovation Seminar Room', location='Block B, Floor 2', capacity=80,
-              description='Classroom and seminar venue', hourly_rate=2500, hire_open=True),
-    ])
-    db.flush()
     instant = now_utc()
-    concert_start = instant + timedelta(days=4)
-    workshop_start = instant + timedelta(hours=1)
-    concert = Event(title='Campus Music Night', category='Concert', venue_id=auditorium.id,
-                    start_at=concert_start, end_at=concert_start + timedelta(hours=3),
-                    description='Campus concert with Standard and VIP tickets', status='published')
-    workshop = Event(title='QR Check-in Workshop', category='Workshop', venue_id=auditorium.id,
-                     start_at=workshop_start, end_at=workshop_start + timedelta(hours=2),
-                     description='Workshop with QR ticket check-in', status='published')
-    db.add_all([concert, workshop])
-    db.flush()
-    db.add_all([
-        TicketCategory(event_id=concert.id, name='Standard', price=1000, quantity=200, remaining=200),
-        TicketCategory(event_id=concert.id, name='VIP', price=2500, quantity=50, remaining=50),
-        TicketCategory(event_id=workshop.id, name='Entry', price=0, quantity=30, remaining=30),
-    ])
+    listings = (
+        (TECHNOLOGY_HALL, 150, 4000, 'Freshers’ Orientation', 'Other',
+         ORIENTATION_DESCRIPTION, timedelta(hours=1), 100),
+        (APPLIED_SCIENCE_HALL, 80, 2500, 'Research Grants Workshop', 'Workshop',
+         'Sample workshop on applying for university research grants.', timedelta(days=4), 50),
+        (BUSINESS_STUDIES_HALL, 60, 2000, 'Communication Skills Workshop', 'Workshop',
+         'Sample workshop on communication skills for campus and professional settings.', timedelta(days=6), 40),
+    )
+    for venue_name, capacity, rate, title, category, description, starts_in, tickets in listings:
+        venue = Venue(name=venue_name, location=CAMPUS_LOCATION, capacity=capacity, hourly_rate=rate,
+                      hire_open=True, description='Capacity and hire rate are sample values for this coursework project.')
+        start = instant + starts_in
+        event = Event(venue=venue, title=title, category=category, description=description, status='published',
+                      start_at=start, end_at=start + timedelta(hours=2))
+        db.add(TicketCategory(event=event, name='General admission', price=0, quantity=tickets, remaining=tickets))
 
 
 if __name__=='__main__':
