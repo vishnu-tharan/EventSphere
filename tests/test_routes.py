@@ -23,6 +23,36 @@ def test_admin_and_scanner_refuse_wrong_roles(setup_db):
         app.dependency_overrides.clear()
 
 
+def test_venue_request_returns_attendee_to_hire_after_sign_in(setup_db):
+    with setup_db() as db:
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            with TestClient(app) as client:
+                response = client.get('/hire', follow_redirects=False)
+                assert response.status_code == 303
+                login_url = response.headers['location']
+                sign_in = client.get(login_url)
+                assert sign_in.status_code == 200
+                assert 'name="venue_request" value="1"' in sign_in.text
+                csrf = re.search(r'name="csrf" value="([^"]+)"', sign_in.text)[1]
+
+                failed = client.post('/login', data={
+                    'csrf': csrf, 'email': 'alice@test.com', 'password': 'wrong-password',
+                    'venue_request': '1'})
+                assert 'Incorrect email or password' in failed.text
+                assert 'name="venue_request" value="1"' in failed.text
+
+                for email, destination in (('admin@test.com', '/admin'), ('alice@test.com', '/hire')):
+                    signed_in = client.post('/login', data={
+                        'csrf': csrf, 'email': email, 'password': 'Pass12345', 'venue_request': '1'},
+                        follow_redirects=False)
+                    assert signed_in.status_code == 303
+                    assert signed_in.headers['location'] == destination
+                assert 'Hire a venue' in client.get('/hire').text
+        finally:
+            app.dependency_overrides.clear()
+
+
 def test_public_api_lists_published_events(setup_db):
     with setup_db() as db:
         app.dependency_overrides[get_db]=lambda: db

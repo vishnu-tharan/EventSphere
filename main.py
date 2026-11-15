@@ -192,18 +192,23 @@ def register(request: Request, name: str=Form(...), email: str=Form(...),
 
 
 @app.get('/login')
-def login_page(request: Request, note: str='', db: Session=Depends(get_db)):
-    return page(request,'auth.html',db,mode='login',note=note)
+def login_page(request: Request, note: str='', db: Session=Depends(get_db),
+               venue_request: bool=False):
+    return page(request,'auth.html',db,mode='login',note=note,venue_request=venue_request)
 
 
 @app.post('/login')
 def login(request: Request, email: str=Form(...), password: str=Form(...),
-          csrf: str=Form(...), db: Session=Depends(get_db)):
+          csrf: str=Form(...), db: Session=Depends(get_db), venue_request: bool=Form(False)):
     check_csrf(request,csrf)
     user=db.scalar(select(User).where(User.email==email.strip().lower()))
     if not user or not verify_password(password,user.password_hash):
-        return page(request,'auth.html',db,mode='login',error='Incorrect email or password')
-    response=back('/admin' if user.role=='admin' else ('/staff/scanner' if user.role=='staff' else '/'))
+        return page(request,'auth.html',db,mode='login',error='Incorrect email or password',
+                    venue_request=venue_request)
+    if user.role == 'attendee' and venue_request:
+        response = back('/hire')
+    else:
+        response=back('/admin' if user.role=='admin' else ('/staff/scanner' if user.role=='staff' else '/'))
     response.set_cookie('session',auth_signer.dumps(str(user.id)),max_age=7*86400,
                         httponly=True,secure=COOKIE_SECURE,samesite='lax')
     return response
@@ -313,6 +318,8 @@ def notifications(request: Request, db: Session=Depends(get_db)):
 
 @app.get('/hire')
 def hire_page(request: Request,note: str='',db: Session=Depends(get_db)):
+    if get_user(request, db) is None:
+        return back('/login?venue_request=1')
     user=require_role(request,db,'attendee')
     venues=db.scalars(select(Venue).where(Venue.hire_open.is_(True))).all()
     hires=db.scalars(select(HireRequest).where(HireRequest.user_id==user.id)
