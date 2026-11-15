@@ -49,13 +49,22 @@ def test_unused_ticket_shows_event_ended_after_check_in_closes(setup_db):
                 upcoming = client.get('/bookings')
                 assert upcoming.status_code == 200
                 assert sorted(re.findall(statuses, upcoming.text)) == ['active', 'cancelled', 'checked_in']
+                assert 'Cancel booking' in upcoming.text
 
                 booking.event.start_at = now_utc() - timedelta(hours=2)
+                booking.event.end_at = now_utc() + timedelta(hours=1)
+                db.commit()
+                started = client.get('/bookings')
+                assert started.status_code == 200
+                assert 'Cancel booking' not in started.text
+                assert 'Event ended' not in started.text
+
                 booking.event.end_at = now_utc() - timedelta(hours=1)
                 db.commit()
                 ended = client.get('/bookings')
                 assert ended.status_code == 200
                 assert sorted(re.findall(statuses, ended.text)) == ['Event ended', 'cancelled', 'checked_in']
+                assert 'Cancel booking' not in ended.text
                 assert any(ticket.status == 'active' for ticket in booking.tickets)
         finally:
             app.dependency_overrides.clear()
