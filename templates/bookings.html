@@ -7,7 +7,22 @@
 <p class="small mb-1">Total: LKR {{'%.2f'|format(booking.total)}}</p>
 {% if booking.status=='cancelled' %}<p class="small">Simulated refund: LKR {{'%.2f'|format(booking.refund_amount)}}</p>{% endif %}
 {% if booking.status=='paid' %}<form method="post" action="/bookings/{{booking.id}}/cancel" class="mt-3"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel and apply the refund policy?')">Cancel booking</button></form>{% endif %}
-</div><div class="col-lg-5"><div class="d-flex flex-wrap gap-3">{% for ticket in booking.tickets %}<div class="text-center ticket-image"><img src="/tickets/{{ticket.id}}/qr" alt="QR ticket {{ticket.id}}" width="140" height="140"><div class="small fw-semibold">Ticket #{{ticket.id}}</div><div class="small text-muted">{{ticket.status}}</div><details class="small"><summary>Manual code</summary><code class="code-small">{{ticket.code}}</code></details></div>{% endfor %}</div></div>
+</div><div class="col-lg-5"><div class="d-flex flex-wrap gap-3">
+{% for ticket in booking.tickets %}
+<div class="text-center ticket-image">
+  <img src="/tickets/{{ticket.id}}/qr" alt="QR ticket {{ticket.id}}" width="140" height="140">
+  <div class="small fw-semibold">Ticket #{{ticket.id}}</div>
+  <div class="small text-muted" data-ticket-status>
+    {% if ticket.status == 'active' and now > booking.event.end_at %}
+      Event ended
+    {% else %}
+      {{ticket.status}}
+    {% endif %}
+  </div>
+  <details class="small"><summary>Manual code</summary><code class="code-small">{{ticket.code}}</code></details>
+</div>
+{% endfor %}
+</div></div>
 </div></div>
 {% else %}<p>You have no bookings yet. <a href="/">Browse events</a>.</p>{% endfor %}
 {% endblock %}

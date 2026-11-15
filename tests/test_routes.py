@@ -33,6 +33,34 @@ def test_public_api_lists_published_events(setup_db):
         app.dependency_overrides.clear()
 
 
+def test_unused_ticket_shows_event_ended_after_check_in_closes(setup_db):
+    with setup_db() as db:
+        response = MessageBus(db).send('Website', 'BookingAgent', 'REQUEST', {
+            'action': 'book', 'user_id': 1, 'category_id': 1, 'quantity': 3})
+        booking = db.get(Booking, response['content']['booking_id'])
+        booking.tickets[1].status = 'checked_in'
+        booking.tickets[2].status = 'cancelled'
+        db.commit()
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            with TestClient(app) as client:
+                client.cookies.set('session', auth_signer.dumps('1'))
+                statuses = r'data-ticket-status>\s*([^<]+?)\s*</div>'
+                upcoming = client.get('/bookings')
+                assert upcoming.status_code == 200
+                assert sorted(re.findall(statuses, upcoming.text)) == ['active', 'cancelled', 'checked_in']
+
+                booking.event.start_at = now_utc() - timedelta(hours=2)
+                booking.event.end_at = now_utc() - timedelta(hours=1)
+                db.commit()
+                ended = client.get('/bookings')
+                assert ended.status_code == 200
+                assert sorted(re.findall(statuses, ended.text)) == ['Event ended', 'cancelled', 'checked_in']
+                assert any(ticket.status == 'active' for ticket in booking.tickets)
+        finally:
+            app.dependency_overrides.clear()
+
+
 def test_event_capacity_is_enforced_on_venue_edit_and_draft_publish(setup_db):
     with setup_db() as db:
         event = db.get(Event, 1)

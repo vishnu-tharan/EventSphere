@@ -43,7 +43,7 @@ Local setup prompts for a password for each new account. You can also supply the
 python -m pytest -v
 ```
 
-There are **26 tests** covering the agents, concurrency, QR issuance and check-in, refunds, waitlist, notifications, venue capacity, agent logs, and permissions. See tests/.
+The test suite covers the agents, concurrency, QR issuance and check-in, booking status, refunds, waitlist, notifications, venue capacity, agent logs, and permissions. See tests/.
 
 ## Files
 
