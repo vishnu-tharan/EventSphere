@@ -6,6 +6,60 @@ Payments and refunds are simulated. Each successful booking records a payment re
 
 The sample listings use venue names from published [University of Vavuniya](https://www.vau.ac.lk/workshop-on-university-research-grants-and-associated-procedures/), [Faculty of Technological Studies](https://fts.vau.ac.lk/index.php/workshops/), and [Faculty of Business Studies](https://www.vau.ac.lk/workshop-on-communication-skills-2023/) event notices. Dates, capacities, ticket quantities, and hire rates are sample values.
 
+## Screenshots
+
+These screenshots use local sample accounts for Vishnu (admin), Tharan (staff), and Thaksi and Nixon (attendees). The sample events include the ICT Society Workshop and Faculty Research Seminar.
+
+<details>
+<summary>Sign-in and event browsing</summary>
+
+![EventSphere sign-in page](docs/screenshots/login.png)
+
+![Campus event catalogue with search and category filters](docs/screenshots/event-catalogue.png)
+
+![Campus event catalogue on a phone](docs/screenshots/mobile-event-catalogue.png)
+
+</details>
+
+<details>
+<summary>Attendee booking, waitlist, and venue hire</summary>
+
+![ICT Society Workshop details with ticket prices and availability](docs/screenshots/event-details.png)
+
+![Thaksi's booking confirmation with a simulated payment reference and QR ticket](docs/screenshots/booking-confirmation.png)
+
+![Thaksi's ticket marked as checked in](docs/screenshots/checked-in-ticket.png)
+
+![Waitlist notification with the seat hold countdown](docs/screenshots/waitlist-countdown.png)
+
+![VenueAgent offers alternative venues and times for a scheduling conflict](docs/screenshots/venue-hire-alternatives.png)
+
+</details>
+
+<details>
+<summary>Staff check-in</summary>
+
+![Tharan's scanner with event selection and manual ticket entry](docs/screenshots/staff-scanner.png)
+
+![The scanner accepts a valid ticket](docs/screenshots/accepted-check-in.png)
+
+![The scanner rejects a ticket that has already been used](docs/screenshots/duplicate-check-in.png)
+
+</details>
+
+<details>
+<summary>Admin dashboard, events, and venues</summary>
+
+![Vishnu's dashboard showing ticket sales, check-ins, and agent messages](docs/screenshots/admin-dashboard.png)
+
+![Venue management with capacities, rates, and private hire availability](docs/screenshots/venue-management.png)
+
+![Event creation form with scheduling and ticket category settings](docs/screenshots/create-event.png)
+
+![Admin view of private hire requests and their statuses](docs/screenshots/private-hire-requests.png)
+
+</details>
+
 ## Quickest Windows method
 
 Open the project folder, double-click **`setup_windows.bat`**, then **`run_windows.bat`**. The scripts run the setup and startup commands below.
