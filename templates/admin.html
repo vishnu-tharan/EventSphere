@@ -14,6 +14,9 @@
       <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel event</button>
     </form>
     {% endif %}
+    {% if row.event.status == 'published' %}
+    <a class="btn btn-sm btn-outline-dark" href="/admin/events/{{row.event.id}}/attendance.csv">Attendance CSV<span class="visually-hidden"> for {{row.event.title}}</span></a>
+    {% endif %}
   </div>
 {% endmacro %}
 

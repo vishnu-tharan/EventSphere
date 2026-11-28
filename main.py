@@ -1,5 +1,6 @@
 """EventSphere: FastAPI + five JSON-message agents + mobile-friendly website."""
 import asyncio
+import csv
 import io
 import json
 import math
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo
 import qrcode
 from starlette.datastructures import URL
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
@@ -432,6 +433,41 @@ def admin(request: Request, db: Session=Depends(get_db), note: str='',
                 note=note, conversation_id=conversation_id, before=before, older_than=older_than,
                 q=q, status=status, pending_hires=pending_hires,
                 show_activity=activity or bool(conversation_id) or before is not None)
+
+
+def csv_text(value: str) -> str:
+    """Keep spreadsheet programs from interpreting text fields as formulas."""
+    if value.startswith(('\t', '\r', '\n')) or value.lstrip().startswith(('=', '+', '-', '@', '＝', '＋', '－', '＠')):
+        return "'" + value
+    return value
+
+
+@app.get('/admin/events/{event_id}/attendance.csv')
+def download_attendance(event_id: int, request: Request, db: Session=Depends(get_db)):
+    require_role(request, db, 'admin')
+    event = db.get(Event, event_id)
+    if event is None or event.status != 'published':
+        raise HTTPException(404, 'Published event not found')
+    rows = db.execute(
+        select(Ticket.id, User.name, TicketCategory.name, Ticket.status, Ticket.checked_in_at)
+        .select_from(Ticket).join(Ticket.booking).join(Booking.user).join(Booking.category)
+        .where(Booking.event_id == event.id, Booking.status == 'paid')
+        .order_by(Ticket.id)
+    )
+    output = io.StringIO(newline='')
+    writer = csv.writer(output)
+    writer.writerow(['Ticket number', 'Booked by', 'Ticket category', 'Attendance', f'Check-in time ({LOCAL_TZ.key})'])
+    for ticket_id, name, category, status, checked_in_at in rows:
+        timestamp = checked_in_at.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ) if checked_in_at else None
+        writer.writerow([
+            ticket_id, csv_text(name), csv_text(category),
+            'Checked in' if status == 'checked_in' else 'Not checked in',
+            timestamp.isoformat(timespec='seconds') if timestamp else '',
+        ])
+    return Response(output.getvalue().encode('utf-8-sig'), media_type='text/csv', headers={
+        'Content-Disposition': f'attachment; filename="event-{event.id}-attendance.csv"',
+        'Cache-Control': 'private, no-store',
+    })
 
 
 @app.get('/admin/venues')

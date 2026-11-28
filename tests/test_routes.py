@@ -1,4 +1,6 @@
 """HTTP role checks and public mobile page smoke tests."""
+import csv
+import io
 from fastapi.testclient import TestClient
 from datetime import timedelta
 import re
@@ -379,3 +381,41 @@ def test_draft_edit_prefills_and_saves_details_before_publish(setup_db, monkeypa
             assert client.post(edit_path, data=form).status_code == 404
             client.cookies.set('session', auth_signer.dumps('1'))
             assert client.get(edit_path).status_code == 403
+
+
+def test_attendance_export_is_event_specific_and_admin_only(upcoming_booking):
+    db, client, booking = upcoming_booking
+    bus = MessageBus(db)
+    cancelled = bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'book', 'user_id': 2, 'category_id': 1, 'quantity': 1})
+    assert bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'cancel', 'user_id': 2, 'booking_id': cancelled['content']['booking_id'],
+    })['performative'] == 'AGREE'
+    db.get(User, 1).name = '=Vishnu'
+    booking.category.name = 'தமிழ், Entry'
+    assert bus.send('Scanner', 'TicketAgent', 'REQUEST', {
+        'action': 'checkin', 'event_id': booking.event_id, 'code': booking.tickets[0].code,
+    })['performative'] == 'AGREE'
+    other = Event(title='Another workshop', category='Workshop', venue_id=2,
+                  start_at=booking.event.start_at, end_at=booking.event.end_at, status='published')
+    db.add(other)
+    db.commit()
+    export_path = f'/admin/events/{booking.event_id}/attendance.csv'
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert client.get(export_path).status_code == 403
+    client.cookies.set('session', auth_signer.dumps('3'))
+    assert export_path in client.get('/admin').text
+    response = client.get(export_path)
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/csv')
+    assert response.headers['content-disposition'].endswith('event-1-attendance.csv"')
+    assert response.headers['cache-control'] == 'private, no-store'
+    report = response.content.decode('utf-8-sig')
+    rows = list(csv.reader(io.StringIO(report)))
+    assert rows[0][:4] == ['Ticket number', 'Booked by', 'Ticket category', 'Attendance']
+    assert rows[1][:4] == [str(booking.tickets[0].id), "'=Vishnu", 'தமிழ், Entry', 'Checked in']
+    assert rows[1][4].endswith('+05:30')
+    assert rows[2][3:] == ['Not checked in', '']
+    assert len(rows) == 3 and booking.tickets[0].code not in report
+    empty = client.get(f'/admin/events/{other.id}/attendance.csv')
+    assert len(empty.content.decode('utf-8-sig').splitlines()) == 1
