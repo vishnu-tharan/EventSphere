@@ -772,3 +772,53 @@ def test_closed_event_shows_booking_status_to_signed_out_visitors(upcoming_booki
     assert 'View event<span' in client.get('/').text
     client.cookies.set('session', auth_signer.dumps('1'))
     assert 'action="/book/' not in client.get('/events/1').text
+
+
+def test_group_waitlist_keeps_priority_over_direct_sales(upcoming_booking):
+    db, client, booking = upcoming_booking
+    bus = MessageBus(db)
+    extra = [
+        bus.send('Website', 'BookingAgent', 'REQUEST', {
+            'action': 'book', 'user_id': 1, 'category_id': 1, 'quantity': 1,
+        })['content']['booking_id']
+        for _ in range(3)
+    ]
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('2'))
+    page = client.get('/events/1').text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+    assert 'Added to first-come-first-served waitlist' in client.post(
+        '/waitlist/1', data={'csrf': csrf, 'quantity': 2},
+    ).text
+    head = db.scalar(select(WaitlistEntry).where(WaitlistEntry.user_id == 2))
+
+    client.cookies.set('session', auth_signer.dumps('1'))
+    client.post(f'/bookings/{extra[0]}/cancel', data={'csrf': csrf})
+    assert booking.category.remaining == 1 and head.status == 'waiting'
+    limited = client.get('/events/1').text
+    assert 'The waitlist has priority' in limited and 'action="/book/1"' not in limited
+    assert 'Join waitlist (1 ticket)' in limited
+    attempt = client.post('/book/1', data={'csrf': csrf, 'quantity': 1}, follow_redirects=False)
+    assert attempt.headers['location'].startswith('/events/1')
+    assert booking.category.remaining == 1
+    assert 'Added to first-come-first-served waitlist' in client.post(
+        '/waitlist/1', data={'csrf': csrf, 'quantity': 1},
+    ).text
+    tail = db.scalar(select(WaitlistEntry).where(WaitlistEntry.user_id == 1))
+    assert tail.status == 'waiting'
+
+    client.post(f'/bookings/{extra[1]}/cancel', data={'csrf': csrf})
+    assert head.status == 'offered' and tail.status == 'waiting' and booking.category.remaining == 0
+    client.cookies.set('session', auth_signer.dumps('2'))
+    claim = client.post('/book/1', data={'csrf': csrf, 'quantity': 2, 'hold_id': head.id},
+                        follow_redirects=False)
+    assert claim.headers['location'].startswith('/bookings')
+    assert head.status == 'claimed' and tail.status == 'waiting'
+
+    client.cookies.set('session', auth_signer.dumps('1'))
+    client.post(f'/bookings/{booking.id}/cancel', data={'csrf': csrf})
+    assert tail.status == 'offered' and booking.category.remaining == 1
+    client.cookies.set('session', auth_signer.dumps('2'))
+    direct = client.post('/book/1', data={'csrf': csrf, 'quantity': 1}, follow_redirects=False)
+    assert direct.headers['location'].startswith('/bookings')
+    assert booking.category.remaining == 0 and tail.status == 'offered'

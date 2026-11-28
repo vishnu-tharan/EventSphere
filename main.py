@@ -233,14 +233,20 @@ def event_page(event_id: int, request: Request, note: str='', db: Session=Depend
         raise HTTPException(404,'Published event not found')
     user = get_user(request, db)
     waitlist = {}
-    if user and user.role == 'attendee':
+    queued_categories = set()
+    if user and user.role == 'attendee' and event.start_at > now_utc():
         entries = db.scalars(select(WaitlistEntry).join(TicketCategory).where(
             TicketCategory.event_id == event.id, WaitlistEntry.user_id == user.id,
             WaitlistEntry.status.in_(['waiting', 'offered']))
             .order_by(WaitlistEntry.created_at, WaitlistEntry.id))
         for entry in entries:
             waitlist.setdefault(entry.category_id, entry)
-    return page(request, 'event.html', db, event=event, note=note, waitlist=waitlist)
+        queued_categories = set(db.scalars(
+            select(WaitlistEntry.category_id).join(TicketCategory)
+            .where(TicketCategory.event_id == event.id, WaitlistEntry.status == 'waiting').distinct()
+        ))
+    return page(request, 'event.html', db, event=event, note=note, waitlist=waitlist,
+                queued_categories=queued_categories)
 
 
 @app.post('/book/{category_id}')

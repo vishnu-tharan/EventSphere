@@ -33,6 +33,12 @@ def parse_dt(value):
     return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
 
 
+def has_waiting_entries(db: Session, category_id: int) -> bool:
+    return db.scalar(select(WaitlistEntry.id).where(
+        WaitlistEntry.category_id == category_id, WaitlistEntry.status == 'waiting'
+    ).limit(1)) is not None
+
+
 class BookingInput(BaseModel):
     user_id: int = Field(gt=0)
     category_id: int = Field(gt=0)
@@ -294,6 +300,8 @@ class BookingAgent:
             if offered is None:
                 if data.hold_id is not None:
                     return result('REFUSE', reason='This waitlist hold is no longer available')
+                if has_waiting_entries(db, data.category_id):
+                    return result('REFUSE', reason='The waitlist has priority for this ticket category')
                 # Single atomic UPDATE is safe under concurrent PostgreSQL transactions.
                 # SQLite serialises writers; rowcount guarantees only one wins the last seat.
                 changed = db.execute(update(TicketCategory).where(
@@ -454,12 +462,12 @@ class WaitlistAgent:
                 return result('REFUSE', reason='Event is not published or booking has closed')
             if qty > cat.quantity:
                 return result('REFUSE', reason='Requested quantity exceeds the ticket category capacity')
-            if cat.remaining >= qty:
-                return result('REFUSE', reason='Tickets are currently available; please book directly')
             if db.scalar(select(WaitlistEntry).where(
                     WaitlistEntry.user_id==user_id,WaitlistEntry.category_id==category_id,
                     WaitlistEntry.status.in_(['waiting','offered'])).limit(1)):
                 return result('REFUSE',reason='You are already in this waitlist')
+            if cat.remaining >= qty and not has_waiting_entries(db, category_id):
+                return result('REFUSE', reason='Tickets are currently available; please book directly')
             entry=WaitlistEntry(user_id=user_id, category_id=category_id,quantity=qty,status='waiting')
             db.add(entry); db.flush()
             self._offer(bus,category_id,cid)

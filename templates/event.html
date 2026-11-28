@@ -9,6 +9,7 @@
 {% for cat in event.ticket_categories %}
 {% set entry = waitlist.get(cat.id) %}
 {% set hold = entry if entry and entry.status == 'offered' and entry.expires_at and entry.expires_at > now else none %}
+{% set queue_has_priority = cat.id in queued_categories %}
 <div class="card p-3 mb-3"><div class="d-flex justify-content-between"><div><b>{{cat.name}}</b><div class="small text-muted">{{cat.remaining}} / {{cat.quantity}} left</div></div><b>LKR {{'%.2f'|format(cat.price)}}</b></div>
 {% if booking_open and user and user.role == 'attendee' %}
 {% if hold %}
@@ -20,8 +21,12 @@
   <button class="btn btn-dark w-100">Claim {{hold.quantity}} held ticket(s)</button>
 </form>
 {% else %}
+{% if queue_has_priority %}
+<p class="small text-secondary mt-3 mb-2">The waitlist has priority for this ticket category.</p>
+{% else %}
 <form method="post" action="/book/{{cat.id}}" class="d-flex gap-2 mt-3"><input type="hidden" name="csrf" value="{{csrf}}"><input type="number" class="form-control" name="quantity" min="1" max="6" value="1" aria-label="Number of tickets" style="max-width:95px"><button class="btn btn-dark flex-grow-1" {% if cat.remaining==0 %}disabled{% endif %}>Book tickets</button></form>
-{% if not entry %}
+{% endif %}
+{% if not entry and (queue_has_priority or cat.remaining == 0) %}
 <form method="post" action="/waitlist/{{cat.id}}" class="d-flex gap-2 mt-2"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="quantity" value="1"><button class="btn btn-outline-secondary w-100">Join waitlist (1 ticket)</button></form>
 {% endif %}
 {% endif %}
