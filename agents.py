@@ -317,6 +317,10 @@ class BookingAgent:
                 return result('REFUSE', reason='Booking already cancelled')
             if event.start_at <= now_utc() and event.status != 'cancelled':
                 return result('REFUSE', reason='Cannot cancel after event starts')
+            checked_in_ticket = db.scalar(select(Ticket.id).where(
+                Ticket.booking_id == booking.id, Ticket.status == 'checked_in').limit(1))
+            if checked_in_ticket is not None:
+                return result('REFUSE', reason='Cannot cancel this booking after a ticket has been checked in')
             hours_left = (event.start_at - now_utc()).total_seconds() / 3600
             fraction = 1.0 if event.status == 'cancelled' or hours_left >= 48 else (0.5 if hours_left >= 24 else 0.0)
             refund = round(booking.total * fraction, 2)

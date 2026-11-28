@@ -3,7 +3,10 @@
 <h2 class="h5 mt-4">Event sales and check-ins</h2><div class="table-responsive"><table class="table table-striped align-middle"><thead><tr><th>Event</th><th>Status</th><th>Tickets sold</th><th>Sim. revenue (LKR)</th><th>Check-ins</th><th>Capacity</th><th>Actions</th></tr></thead><tbody>
 {% for row in stats %}<tr><td>{{row.event.title}}<div class="small text-muted">{{row.event.venue.name}}</div></td><td>{{row.event.status}}</td><td>{{row.sold}}</td><td>{{'%.2f'|format(row.revenue)}}</td><td>{{row.checkins}}</td><td>{{row.capacity}}</td><td>
 {% if row.event.status=='draft' %}<form method="post" action="/admin/events/{{row.event.id}}/publish"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-success">Publish</button></form>{% endif %}
-{% if row.event.status=='published' %}<form method="post" action="/admin/events/{{row.event.id}}/cancel"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel</button></form>{% endif %}
+{% if row.event.status=='published' %}
+  {% if now > row.event.end_at %}<span class="text-muted">Event ended</span>
+  {% else %}<form method="post" action="/admin/events/{{row.event.id}}/cancel"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel</button></form>{% endif %}
+{% endif %}
 </td></tr>{% endfor %}</tbody></table></div>
 <h2 class="h5 mt-5">Agent persistent beliefs / counters</h2>
 <div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Agent</th><th>State key</th><th>Saved JSON value</th></tr></thead><tbody>

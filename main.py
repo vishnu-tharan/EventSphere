@@ -525,6 +525,8 @@ def event_cancel(event_id: int,request: Request,csrf: str=Form(...),db: Session=
     require_role(request,db,'admin')
     event=lock_row(db, Event, event_id)
     if not event or event.status!='published':raise HTTPException(400,'Published event not found')
+    if now_utc() > event.end_at:
+        raise HTTPException(409, 'Cannot cancel an event that has ended')
     event.status='cancelled'
     answer=MessageBus(db).send('Admin','BookingAgent','REQUEST',
                                {'action':'event_cancelled','event_id':event_id})

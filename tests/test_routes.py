@@ -2,6 +2,7 @@
 from fastapi.testclient import TestClient
 from datetime import timedelta
 import re
+import pytest
 from sqlalchemy import select
 from main import app, auth_signer, for_input
 from database import get_db
@@ -79,7 +80,7 @@ def test_unused_ticket_shows_event_ended_after_check_in_closes(setup_db):
                 upcoming = client.get('/bookings')
                 assert upcoming.status_code == 200
                 assert sorted(re.findall(statuses, upcoming.text)) == ['active', 'cancelled', 'checked_in']
-                assert 'Cancel booking' in upcoming.text
+                assert 'Cancel booking' not in upcoming.text
 
                 booking.event.start_at = now_utc() - timedelta(hours=2)
                 booking.event.end_at = now_utc() + timedelta(hours=1)
@@ -213,3 +214,60 @@ def test_cancelling_event_refunds_bookings_and_restores_held_stock(setup_db):
                 assert category.remaining == category.quantity
         finally:
             app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def upcoming_booking(setup_db, monkeypatch):
+    with setup_db() as db:
+        event = db.get(Event, 1)
+        event.start_at = now_utc() + timedelta(hours=1)
+        event.end_at = event.start_at + timedelta(hours=2)
+        booked = MessageBus(db).send('Website', 'BookingAgent', 'REQUEST', {
+            'action': 'book', 'user_id': 1, 'category_id': 1, 'quantity': 2})
+        db.commit()
+        booking = db.get(Booking, booked['content']['booking_id'])
+        monkeypatch.setitem(app.dependency_overrides, get_db, lambda: db)
+        with TestClient(app) as client:
+            yield db, client, booking
+
+
+def test_early_checkin_prevents_whole_booking_cancellation(upcoming_booking):
+    db, client, booking = upcoming_booking
+    client.cookies.set('session', auth_signer.dumps('1'))
+    page = client.get('/bookings')
+    cancel_path = f'/bookings/{booking.id}/cancel'
+    assert cancel_path in page.text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+
+    scanned = MessageBus(db).send('Scanner', 'TicketAgent', 'REQUEST', {
+        'action': 'checkin', 'event_id': booking.event_id, 'code': booking.tickets[0].code})
+    assert scanned['performative'] == 'AGREE'
+    db.commit()
+    assert cancel_path not in client.get('/bookings').text
+    response = client.post(cancel_path, data={'csrf': csrf})
+    assert 'Cannot cancel this booking after a ticket has been checked in' in response.text
+    db.expire_all()
+    assert booking.status == 'paid' and booking.refund_amount == 0
+    assert sorted(t.status for t in booking.tickets) == ['active', 'checked_in']
+    assert booking.category.remaining == 3
+
+
+def test_ended_event_cannot_be_cancelled_or_refunded(upcoming_booking):
+    db, client, booking = upcoming_booking
+    client.cookies.set('session', auth_signer.dumps('3'))
+    page = client.get('/admin')
+    cancel_path = f'/admin/events/{booking.event_id}/cancel'
+    assert cancel_path in page.text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+
+    booking.event.start_at = now_utc() - timedelta(hours=3)
+    booking.event.end_at = now_utc() - timedelta(hours=1)
+    db.commit()
+    ended = client.get('/admin')
+    assert 'Event ended' in ended.text and cancel_path not in ended.text
+    assert client.post(cancel_path, data={'csrf': csrf}).status_code == 409
+    db.expire_all()
+    assert booking.event.status == 'published'
+    assert booking.status == 'paid' and booking.refund_amount == 0
+    assert booking.category.remaining == 3
+    assert all(ticket.status == 'active' for ticket in booking.tickets)
