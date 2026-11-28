@@ -6,23 +6,9 @@
 {% endmacro %}
 {% macro actions(row) %}
   <div class="d-flex flex-wrap align-items-center gap-2">
+    <a class="btn btn-sm btn-dark" href="/admin/events/{{row.event.id}}/manage">Manage event<span class="visually-hidden"> {{row.event.title}}</span></a>
     {% if row.event.status == 'published' %}
     <a class="btn btn-sm btn-outline-dark" href="/admin/events/{{row.event.id}}/attendance.csv">Attendance CSV<span class="visually-hidden"> for {{row.event.title}}</span></a>
-    {% endif %}
-    {% if row.status == 'upcoming' and row.checkins == 0 %}
-    <a class="btn btn-sm btn-outline-dark" href="/admin/events/{{row.event.id}}/schedule">Update schedule</a>
-    {% endif %}
-    {% if row.status == 'draft' %}
-    <a class="btn btn-sm btn-outline-dark" href="/admin/events/{{row.event.id}}/edit">Edit draft</a>
-    <form method="post" action="/admin/events/{{row.event.id}}/publish">
-      <input type="hidden" name="csrf" value="{{csrf}}">
-      <button class="btn btn-sm btn-outline-success">Publish</button>
-    </form>
-    {% elif row.status in ('upcoming', 'in-progress') %}
-    <form method="post" action="/admin/events/{{row.event.id}}/cancel">
-      <input type="hidden" name="csrf" value="{{csrf}}">
-      <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel event</button>
-    </form>
     {% endif %}
   </div>
 {% endmacro %}

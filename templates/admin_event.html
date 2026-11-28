@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block title %}Manage {{event.title}}{% endblock %}
+{% block content %}
+{% set manage_url = '/admin/events/' ~ event.id ~ '/manage' %}
+<a href="/admin#event-list" class="small">Back to dashboard</a>
+<header class="admin-header mt-2">
+  <div>
+    <h1 class="h2 mb-1">{{event.title}}</h1>
+    <p class="mb-1 text-secondary">{{fmt(event.start_at)}} to {{fmt(event.end_at)}} (Sri Lanka) · {{event.venue.name}}</p>
+    <span class="badge text-bg-secondary">{{'Event ended' if event_status == 'ended' else event_status|replace('-', ' ')|capitalize}}</span>
+  </div>
+  <div class="admin-actions">
+    {% if event.status == 'published' %}
+    <a class="btn btn-outline-dark" href="/admin/events/{{event.id}}/attendance.csv">Attendance CSV</a>
+    {% endif %}
+    {% if event_status == 'upcoming' and total_checkins == 0 %}
+    <a class="btn btn-outline-dark" href="/admin/events/{{event.id}}/schedule">Update schedule</a>
+    {% endif %}
+    {% if event_status == 'draft' %}
+    <a class="btn btn-outline-dark" href="/admin/events/{{event.id}}/edit">Edit draft</a>
+    <form method="post" action="/admin/events/{{event.id}}/publish">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <input type="hidden" name="from_manage" value="true">
+      <button class="btn btn-dark">Publish</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+<nav class="d-flex flex-wrap gap-3 mt-3" aria-label="Event sections">
+  <a href="#event-bookings">Bookings</a>
+  <a href="#event-attendance">Attendance</a>
+  <a href="#event-waitlist">Waitlist</a>
+</nav>
+
+<section class="mt-4" id="event-bookings" aria-labelledby="bookings-title">
+  <h2 class="h4" id="bookings-title">Bookings</h2>
+  <p>Net simulated revenue <strong>LKR {{'%.2f'|format(net_revenue)}}</strong> · Simulated refunds <strong>LKR {{'%.2f'|format(total_refunds)}}</strong></p>
+  <form action="{{manage_url}}#event-bookings" method="get" class="card p-3 mb-3" role="search" aria-label="Search event bookings">
+    <label for="booking-search" class="form-label">Attendee name, booking number, or payment reference</label>
+    <div class="d-flex flex-wrap gap-2">
+      <input type="search" class="form-control w-auto flex-grow-1" id="booking-search" name="q" value="{{q}}" maxlength="250">
+      <button class="btn btn-dark">Search</button>
+      {% if q %}<a class="btn btn-link" href="{{manage_url}}#event-bookings">Clear</a>{% endif %}
+    </div>
+  </form>
+  <div class="d-grid gap-2">
+    {% for booking, checkins in bookings %}
+    <article class="card p-3">
+      <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start">
+        <h3 class="h5 mb-0">{{booking.user.name}} <span class="small text-muted">· Booking #{{booking.id}}</span></h3>
+        <span class="badge text-bg-{{'success' if booking.status == 'paid' else 'secondary'}}">{{booking.status|capitalize}}</span>
+      </div>
+      <p class="small mb-1 mt-2">{{booking.category.name}} × {{booking.quantity}} · {{checkins}} checked in</p>
+      <p class="small mb-0">Payment reference <code>{{booking.payment_ref}}</code> · Total LKR {{'%.2f'|format(booking.total)}}
+        {% if booking.status == 'cancelled' %} · Refund LKR {{'%.2f'|format(booking.refund_amount)}}{% endif %}
+      </p>
+    </article>
+    {% else %}
+    <p class="text-secondary">{{'No bookings match your search.' if q else 'No bookings to show.'}}</p>
+    {% endfor %}
+  </div>
+  <nav class="d-flex flex-wrap gap-2 mt-3" aria-label="Booking pages">
+    {% if before is not none %}<a class="btn btn-sm btn-outline-dark" href="{{manage_url}}?q={{q|urlencode}}#event-bookings">Newest bookings</a>{% endif %}
+    {% if older_than is not none %}<a class="btn btn-sm btn-outline-dark" href="{{manage_url}}?q={{q|urlencode}}&amp;before={{older_than}}#event-bookings">Older bookings</a>{% endif %}
+  </nav>
+</section>
+
+<section class="mt-4" id="event-attendance" aria-labelledby="attendance-title">
+  <h2 class="h4" id="attendance-title">Attendance and ticket stock</h2>
+  {% if categories %}
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead><tr><th scope="col">Category</th><th scope="col">Sold</th><th scope="col">Remaining</th><th scope="col">Checked in</th></tr></thead>
+      <tbody>
+        {% for category in categories %}
+        {% set sales = category_sales.get(category.id) %}
+        <tr><th scope="row">{{category.name}}</th><td>{{sales.sold if sales else 0}}</td>
+            <td>{{category.remaining}}</td><td>{{sales.checkins if sales else 0}}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="text-secondary">No ticket categories.</p>{% endif %}
+</section>
+
+<section class="mt-4" id="event-waitlist" aria-labelledby="waitlist-title">
+  <h2 class="h4" id="waitlist-title">Waitlist</h2>
+  {% if waitlist %}
+  <ul class="list-group">
+    {% for entry in waitlist %}
+    <li class="list-group-item">
+      <div class="d-flex flex-wrap gap-2 justify-content-between">
+        <strong>{{entry.user.name}}</strong>
+        <span class="badge text-bg-{{'warning' if entry.status == 'offered' else 'secondary'}}">{{'Active hold' if entry.status == 'offered' else 'Waiting'}}</span>
+      </div>
+      <div class="small">{{entry.category.name}} × {{entry.quantity}}{% if entry.status == 'offered' %} · Expires {{fmt(entry.expires_at)}}{% endif %}</div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="text-secondary">No active waitlist entries.</p>{% endif %}
+</section>
+
+{% if event_status in ('upcoming', 'in-progress') %}
+<section class="mt-5 border-top pt-3" aria-labelledby="cancel-title">
+  <h2 class="h5" id="cancel-title">Cancel this event</h2>
+  <p>All paid bookings will receive a full simulated refund.</p>
+  <form method="post" action="/admin/events/{{event.id}}/cancel"
+        onsubmit="return confirm('Cancel this event and refund all paid bookings?')">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+    <input type="hidden" name="from_manage" value="true">
+    <button class="btn btn-outline-danger">Cancel event</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

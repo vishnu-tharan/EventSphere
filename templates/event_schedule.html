@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Update event schedule{% endblock %}
 {% block content %}
-<a href="/admin" class="small">Back to dashboard</a>
+<a href="/admin/events/{{event.id}}/manage" class="small">Back to event</a>
 <h1 class="h2 mt-2">Update event schedule</h1>
 <p class="text-secondary">{{event.title}}. Attendees with confirmed bookings will receive the new details.</p>
 <form class="card event-editor p-3 p-md-4" method="post" action="/admin/events/{{event.id}}/schedule">

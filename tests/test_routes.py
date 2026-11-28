@@ -257,7 +257,8 @@ def test_early_checkin_prevents_whole_booking_cancellation(upcoming_booking):
 def test_ended_event_cannot_be_cancelled_or_refunded(upcoming_booking):
     db, client, booking = upcoming_booking
     client.cookies.set('session', auth_signer.dumps('3'))
-    page = client.get('/admin')
+    manage_path = f'/admin/events/{booking.event_id}/manage'
+    page = client.get(manage_path)
     cancel_path = f'/admin/events/{booking.event_id}/cancel'
     assert cancel_path in page.text
     csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
@@ -265,7 +266,7 @@ def test_ended_event_cannot_be_cancelled_or_refunded(upcoming_booking):
     booking.event.start_at = now_utc() - timedelta(hours=3)
     booking.event.end_at = now_utc() - timedelta(hours=1)
     db.commit()
-    ended = client.get('/admin')
+    ended = client.get(manage_path)
     assert 'Event ended' in ended.text and cancel_path not in ended.text
     assert client.post(cancel_path, data={'csrf': csrf}).status_code == 409
     db.expire_all()
@@ -367,7 +368,7 @@ def test_draft_edit_prefills_and_saves_details_before_publish(setup_db, monkeypa
         with TestClient(app) as client:
             client.cookies.set('session', auth_signer.dumps('3'))
             edit_path = '/admin/events/1/edit'
-            assert edit_path in client.get('/admin').text
+            assert edit_path in client.get('/admin/events/1/manage').text
             edit = client.get(edit_path)
             assert edit.status_code == 200
             assert 'value="Event A"' in edit.text and 'value="VIP"' in edit.text
@@ -490,7 +491,8 @@ def test_published_schedule_checks_conflicts_and_notifies_each_attendee_once(upc
     client.cookies.set('session', auth_signer.dumps('1'))
     assert client.get(path).status_code == 403
     client.cookies.set('session', auth_signer.dumps('3'))
-    assert path in client.get('/admin').text
+    manage_path = f'/admin/events/{event.id}/manage'
+    assert path in client.get(manage_path).text
     page = client.get(path).text
     form = {
         'csrf': re.search(r'name="csrf" value="([^"]+)"', page)[1],
@@ -515,7 +517,7 @@ def test_published_schedule_checks_conflicts_and_notifies_each_attendee_once(upc
     booking.tickets[0].status = 'checked_in'
     db.commit()
     assert 'Schedule changes close' in client.post(path, data=form).text
-    assert path not in client.get('/admin').text
+    assert path not in client.get(manage_path).text
 
 
 def test_leaving_waitlist_releases_hold_once_and_offers_it_to_next_attendee(upcoming_booking):
@@ -566,3 +568,47 @@ def test_venue_availability_merges_buffers_without_showing_booking_details(upcom
     assert 'Hidden event name' not in response.text and 'Private pending purpose' not in response.text
     assert '01:00 PM' not in response.text
     assert client.get('/hire/availability', params={'venue_id': 99, 'day': day}).status_code == 404
+
+
+def test_manage_event_limits_search_and_stats_to_selected_event(upcoming_booking):
+    db, client, booking = upcoming_booking
+    booking.tickets[0].status = 'checked_in'
+    booking.event.start_at += timedelta(days=3)
+    booking.event.end_at += timedelta(days=3)
+    bus = MessageBus(db)
+    response = bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'book', 'user_id': 2, 'category_id': 1, 'quantity': 1})
+    other_booking = db.get(Booking, response['content']['booking_id'])
+    bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'cancel', 'user_id': 2, 'booking_id': other_booking.id})
+    db.add(WaitlistEntry(user_id=2, category_id=1, quantity=1, status='offered',
+                         expires_at=now_utc() + timedelta(minutes=5)))
+    unrelated = Event(title='Another event', category='Workshop', venue_id=2,
+                      start_at=booking.event.start_at, end_at=booking.event.end_at, status='published')
+    category = TicketCategory(event=unrelated, name='Private category', price=100, quantity=5, remaining=5)
+    db.add_all([unrelated, category])
+    db.flush()
+    booked_elsewhere = bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'book', 'user_id': 2, 'category_id': category.id, 'quantity': 1})
+    unrelated_ref = booked_elsewhere['content']['payment_ref']
+    db.commit()
+
+    url = f'/admin/events/{booking.event_id}/manage'
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert client.get(url).status_code == 403
+    client.cookies.set('session', auth_signer.dumps('3'))
+    assert url in client.get('/admin').text
+    page = client.get(url)
+    assert page.status_code == 200 and page.headers['cache-control'] == 'private, no-store'
+    assert booking.payment_ref in page.text and other_booking.payment_ref in page.text
+    assert 'Active hold' in page.text and '1 checked in' in page.text
+    assert 'Simulated refunds <strong>LKR 100.00</strong>' in page.text
+    assert 'Net simulated revenue <strong>LKR 200.00</strong>' in page.text
+    assert unrelated_ref not in page.text and booking.tickets[0].code not in page.text
+    filtered = client.get(url, params={'q': ' aLiCe '}).text
+    assert booking.payment_ref in filtered and other_booking.payment_ref not in filtered
+    filtered = client.get(url, params={'q': other_booking.payment_ref}).text
+    assert booking.payment_ref not in filtered and other_booking.payment_ref in filtered
+    filtered = client.get(url, params={'q': f'#{booking.id}'}).text
+    assert booking.payment_ref in filtered and other_booking.payment_ref not in filtered
+    assert 'No bookings match' in client.get(url, params={'q': unrelated_ref}).text

@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from pydantic import BaseModel
-from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import String, case, cast, func, or_, select
+from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from agents import BUFFER_MINUTES, MessageBus, venue_busy_periods
 from calendar_file import event_calendar
@@ -472,19 +472,22 @@ def checkin(request: Request,event_id: int=Form(...),code: str=Form(...),
     return RedirectResponse(location, status_code=303, headers={'Cache-Control': 'no-store'})
 
 
-@app.get('/admin')
-def admin(request: Request, db: Session=Depends(get_db), note: str='',
-          conversation_id: str='', before: int | None=None, q: str='', status: str='',
-          activity: bool=False):
-    require_role(request, db, 'admin')
-    instant = now_utc()
-    event_status = case(
+def event_status_at(instant: datetime):
+    return case(
         (Event.status == 'draft', 'draft'),
         (Event.status == 'cancelled', 'cancelled'),
         (Event.end_at < instant, 'ended'),
         (Event.start_at <= instant, 'in-progress'),
         else_='upcoming',
     )
+
+
+@app.get('/admin')
+def admin(request: Request, db: Session=Depends(get_db), note: str='',
+          conversation_id: str='', before: int | None=None, q: str='', status: str='',
+          activity: bool=False):
+    require_role(request, db, 'admin')
+    event_status = event_status_at(now_utc())
     sold = case((Booking.status == 'paid', Booking.quantity), else_=0)
     sales = select(
         Booking.event_id,
@@ -523,6 +526,74 @@ def admin(request: Request, db: Session=Depends(get_db), note: str='',
                 note=note, conversation_id=conversation_id, before=before, older_than=older_than,
                 q=q, status=status, pending_hires=pending_hires,
                 show_activity=activity or bool(conversation_id) or before is not None)
+
+
+@app.get('/admin/events/{event_id}/manage')
+def manage_event(event_id: int, request: Request, db: Session=Depends(get_db), q: str='',
+                 before: int | None=None, note: str=''):
+    require_role(request, db, 'admin')
+    instant = now_utc()
+    event_row = db.execute(
+        select(Event, event_status_at(instant)).where(Event.id == event_id)
+        .options(joinedload(Event.venue), selectinload(Event.ticket_categories))
+    ).one_or_none()
+    if event_row is None:
+        raise HTTPException(404, 'Event not found')
+    event, status = event_row
+    checked_in = (
+        select(Ticket.booking_id, func.count(Ticket.id).label('count'))
+        .join(Ticket.booking)
+        .where(Booking.event_id == event.id, Booking.status == 'paid', Ticket.status == 'checked_in')
+        .group_by(Ticket.booking_id)
+        .subquery()
+    )
+    checkins_per_booking = func.coalesce(checked_in.c.count, 0)
+    category_sales = {
+        row.category_id: row for row in db.execute(
+            select(Booking.category_id,
+                   func.sum(case((Booking.status == 'paid', Booking.quantity), else_=0)).label('sold'),
+                   func.sum(checkins_per_booking).label('checkins'),
+                   func.sum(Booking.refund_amount).label('refunds'),
+                   func.sum(Booking.total - Booking.refund_amount).label('revenue'))
+            .outerjoin(checked_in, checked_in.c.booking_id == Booking.id)
+            .where(Booking.event_id == event.id).group_by(Booking.category_id)
+        )
+    }
+    bookings = (
+        select(Booking, checkins_per_booking).join(Booking.user)
+        .outerjoin(checked_in, checked_in.c.booking_id == Booking.id)
+        .where(Booking.event_id == event.id)
+        .options(contains_eager(Booking.user), joinedload(Booking.category))
+    )
+    q = q.strip()
+    if q:
+        bookings = bookings.where(or_(User.name.icontains(q, autoescape=True),
+                                      Booking.payment_ref.icontains(q, autoescape=True),
+                                      cast(Booking.id, String) == q.removeprefix('#')))
+    if before is not None:
+        bookings = bookings.where(Booking.id < before)
+    rows = db.execute(bookings.order_by(Booking.id.desc()).limit(31)).all()
+    entries = []
+    if status == 'upcoming':
+        entries = db.scalars(
+            select(WaitlistEntry).join(WaitlistEntry.category)
+            .where(TicketCategory.event_id == event.id,
+                   or_(WaitlistEntry.status == 'waiting',
+                       (WaitlistEntry.status == 'offered') & (WaitlistEntry.expires_at > instant)))
+            .options(joinedload(WaitlistEntry.user), contains_eager(WaitlistEntry.category))
+            .order_by(WaitlistEntry.created_at, WaitlistEntry.id)
+        ).all()
+    response = page(
+        request, 'admin_event.html', db, event=event, event_status=status, category_sales=category_sales,
+        categories=sorted(event.ticket_categories, key=lambda category: category.id),
+        total_checkins=sum(row.checkins for row in category_sales.values()),
+        total_refunds=sum(row.refunds for row in category_sales.values()),
+        net_revenue=sum(row.revenue for row in category_sales.values()),
+        bookings=rows[:30], waitlist=entries, q=q, before=before,
+        older_than=rows[29][0].id if len(rows) > 30 else None, note=note,
+    )
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 def csv_text(value: str) -> str:
@@ -690,23 +761,27 @@ def event_save(request: Request,title: str=Form(...),category: str=Form(...),
     for ticket in existing[len(allocations):]:
         event.ticket_categories.remove(ticket)
     db.commit()
-    return back('/admin', 'Draft event updated' if event_id is not None else 'Event created as ' + status)
+    if event_id is not None:
+        return back(f'/admin/events/{event.id}/manage', 'Draft event updated')
+    return back('/admin', 'Event created as ' + status)
 
 
 @app.post('/admin/events/{event_id}/publish')
-def event_publish(event_id: int,request: Request,csrf: str=Form(...),db: Session=Depends(get_db)):
+def event_publish(event_id: int, request: Request, csrf: str=Form(...), db: Session=Depends(get_db),
+                  from_manage: bool=Form(False)):
     check_csrf(request,csrf)
     require_role(request,db,'admin')
     event=lock_row(db, Event, event_id)
     if not event or event.status!='draft':raise HTTPException(400,'Draft event not found')
+    target = f'/admin/events/{event_id}/manage' if from_manage else '/admin'
     decision=MessageBus(db).send('Admin','VenueAgent','REQUEST',{
         'action':'check_event','event_id':event.id,'venue_id':event.venue_id,
         'start_at':event.start_at.isoformat(),'end_at':event.end_at.isoformat(),
         'ticket_quantity':sum(category.quantity for category in event.ticket_categories)})
     if decision['performative']!='AGREE':
-        db.commit();return back('/admin',decision['content'].get('reason','Venue conflict'))
+        db.commit();return back(target,decision['content'].get('reason','Venue conflict'))
     event.status='published';db.commit()
-    return back('/admin','Event published')
+    return back(target,'Event published')
 
 
 def schedule_version(event: Event) -> str:
@@ -724,11 +799,12 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
     event = lock_row(db, Event, event_id) if saving else db.get(Event, event_id)
     if event is None or event.status != 'published':
         raise HTTPException(404, 'Published event not found')
+    manage_url = f'/admin/events/{event.id}/manage'
     instant = now_utc()
     has_checkins = db.scalar(select(Ticket.id).join(Ticket.booking).where(
         Booking.event_id == event.id, Ticket.status == 'checked_in').limit(1))
     if event.start_at <= instant or has_checkins is not None:
-        return back('/admin', 'Schedule changes close when the event starts or the first ticket is checked in.')
+        return back(manage_url, 'Schedule changes close when the event starts or the first ticket is checked in.')
     current_version = schedule_version(event)
     if not saving:
         venues = db.scalars(select(Venue).order_by(Venue.name, Venue.id)).all()
@@ -741,7 +817,7 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
     starts = event.start_at if start_at == for_input(event.start_at) else to_utc(start_at)
     ends = event.end_at if end_at == for_input(event.end_at) else to_utc(end_at)
     if (venue_id, starts, ends) == (event.venue_id, event.start_at, event.end_at):
-        return back('/admin', 'The event schedule is already up to date.')
+        return back(manage_url, 'The event schedule is already up to date.')
     if starts <= instant or ends <= starts:
         return back(form_url, 'Choose a future start time and a later end time.')
     hold_until = db.scalar(select(func.max(WaitlistEntry.expires_at)).join(WaitlistEntry.category).where(
@@ -759,7 +835,7 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
         db.commit()
         return back(form_url, decision['content'].get('reason', 'Venue unavailable'))
     if min(event.start_at, starts) <= now_utc():
-        return back('/admin', 'The event start time has arrived. Its schedule can no longer be changed.')
+        return back(manage_url, 'The event start time has arrived. Its schedule can no longer be changed.')
 
     venue = db.get(Venue, venue_id)
     old_schedule = f'{event.venue.name}, {event.venue.location} from {as_local(event.start_at)} to {as_local(event.end_at)}'
@@ -774,11 +850,12 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
             'text': f'{event.title} schedule changed. Previous: {old_schedule}. New: {new_schedule}. Times are in Sri Lanka.',
         })
     db.commit()
-    return back('/admin', f'Event schedule updated. {len(recipients)} attendee(s) notified.')
+    return back(manage_url, f'Event schedule updated. {len(recipients)} attendee(s) notified.')
 
 
 @app.post('/admin/events/{event_id}/cancel')
-def event_cancel(event_id: int,request: Request,csrf: str=Form(...),db: Session=Depends(get_db)):
+def event_cancel(event_id: int, request: Request, csrf: str=Form(...), db: Session=Depends(get_db),
+                 from_manage: bool=Form(False)):
     check_csrf(request,csrf)
     require_role(request,db,'admin')
     event=lock_row(db, Event, event_id)
@@ -788,8 +865,10 @@ def event_cancel(event_id: int,request: Request,csrf: str=Form(...),db: Session=
     event.status='cancelled'
     answer=MessageBus(db).send('Admin','BookingAgent','REQUEST',
                                {'action':'event_cancelled','event_id':event_id})
+    refunds = answer['content']['refunded_bookings']
     db.commit()
-    return back('/admin',f"Event cancelled; full refunds: {answer['content'].get('refunded_bookings',0)}")
+    target = f'/admin/events/{event.id}/manage' if from_manage else '/admin'
+    return back(target, f'Event cancelled; full refunds: {refunds}')
 
 
 @app.get('/admin/hires')
