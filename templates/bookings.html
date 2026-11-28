@@ -31,10 +31,22 @@
       {{ticket.status}}
     {% endif %}
   </div>
+  <a class="btn btn-sm btn-outline-dark my-2 show-ticket-qr" href="/tickets/{{ticket.id}}/qr"
+     data-ticket="{{ticket.id}}">Show QR<span class="visually-hidden"> for ticket {{ticket.id}}</span></a>
   <details class="small"><summary>Manual code</summary><code class="code-small">{{ticket.code}}</code></details>
 </div>
 {% endfor %}
 </div></div>
 </div></div>
 {% else %}<p>You have no bookings yet. <a href="/">Browse events</a>.</p>{% endfor %}
+{% if bookings %}
+<dialog id="ticket-qr-dialog" class="ticket-dialog" aria-labelledby="ticket-qr-title">
+  <h2 id="ticket-qr-title" class="h4"></h2>
+  <img id="ticket-qr-image" alt="Ticket QR code" width="360" height="360">
+  <form method="dialog"><button class="btn btn-dark mt-3">Close QR</button></form>
+</dialog>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if bookings %}<script src="/static/ticket-qr.js"></script>{% endif %}
 {% endblock %}
