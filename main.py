@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, case, cast, func, or_, select
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
-from agents import BUFFER_MINUTES, MessageBus, venue_busy_periods
+from agents import BUFFER_MINUTES, RESERVED_HIRE_STATUSES, MessageBus, venue_busy_periods
 from calendar_file import event_calendar
 from database import Base, engine, get_db, lock_row, SessionLocal
 from models import (AdminActivity, AgentMessage, AgentState, Booking, Event, HireRequest, Notification,
@@ -359,7 +359,8 @@ def hire_page(request: Request,note: str='',db: Session=Depends(get_db)):
     venues=db.scalars(select(Venue).where(Venue.hire_open.is_(True))).all()
     hires=db.scalars(select(HireRequest).where(HireRequest.user_id==user.id)
                      .order_by(HireRequest.id.desc())).all()
-    return page(request,'hire.html',db,venues=venues,hires=hires,note=note,json_loads=json.loads)
+    return page(request,'hire.html',db,venues=venues,hires=hires,note=note,json_loads=json.loads,
+                cancellable_statuses=RESERVED_HIRE_STATUSES)
 
 
 @app.get('/hire/availability')
@@ -437,6 +438,20 @@ def accept_hire(hire_id: int,index: int,request: Request,csrf: str=Form(...),
         'end_at':option['end_at']})
     db.commit()
     return back('/hire',answer['content'].get('reason') or f"Hire status: {answer['content'].get('status','updated')}")
+
+
+@app.post('/hire/{hire_id}/cancel')
+def cancel_hire(hire_id: int, request: Request, csrf: str=Form(...), db: Session=Depends(get_db)):
+    check_csrf(request, csrf)
+    user = require_role(request, db, 'attendee')
+    hire = db.get(HireRequest, hire_id)
+    if hire is None or hire.user_id != user.id:
+        raise HTTPException(404, 'Venue hire not found')
+    answer = MessageBus(db).send('Website', 'VenueAgent', 'REQUEST', {
+        'action': 'cancel_hire', 'hire_id': hire.id, 'user_id': user.id,
+    })
+    db.commit()
+    return back('/hire', answer['content']['reason'])
 
 
 @app.get('/staff/scanner')

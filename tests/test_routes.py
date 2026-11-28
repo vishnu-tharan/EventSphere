@@ -617,6 +617,62 @@ def test_manage_event_limits_search_and_stats_to_selected_event(upcoming_booking
     assert 'No bookings match' in client.get(url, params={'q': unrelated_ref}).text
 
 
+@pytest.mark.parametrize('status', ['pending', 'confirmed'])
+def test_cancel_own_future_hire_releases_slot_and_prevents_approval(upcoming_booking, status):
+    db, client, booking = upcoming_booking
+    day = (now_utc().date() + timedelta(days=4)).isoformat()
+    start, end = to_utc(day + 'T10:00'), to_utc(day + 'T11:00')
+    hire = HireRequest(user_id=1, venue_id=2, start_at=start, end_at=end,
+                       purpose='Research workshop', guest_count=10, status=status)
+    db.add(hire)
+    db.commit()
+    url = f'/hire/{hire.id}/cancel'
+    client.cookies.set('session', auth_signer.dumps('2'))
+    page = client.get('/hire')
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+    assert url not in page.text
+    assert client.post(url, data={'csrf': csrf}).status_code == 404
+    availability = '/hire/availability'
+    params = {'venue_id': 2, 'day': day}
+    assert '>Busy</span>' in client.get(availability, params=params).text
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert url in client.get('/hire').text
+    assert client.post(url, data={'csrf': 'invalid'}).status_code == 403
+    cancelled = client.post(url, data={'csrf': csrf}).text
+    assert 'Venue hire cancelled' in cancelled and url not in cancelled
+    assert hire.status == 'cancelled'
+    assert '>Busy</span>' not in client.get(availability, params=params).text
+    assert 'Only pending or confirmed' in client.post(url, data={'csrf': csrf}).text
+    assert db.scalar(select(Notification).where(Notification.message.contains('time slot has been released'))) is not None
+
+    client.cookies.set('session', auth_signer.dumps('3'))
+    assert hire.purpose not in client.get('/admin/hires', params={'status': 'pending'}).text
+    assert hire.purpose in client.get('/admin/hires').text
+    assert client.post(f'/admin/hires/{hire.id}/approve', data={'csrf': csrf}).status_code == 400
+    client.cookies.set('session', auth_signer.dumps('2'))
+    replacement = client.post('/hire', data={
+        'csrf': csrf, 'venue_id': 2, 'start_at': for_input(start), 'end_at': for_input(end),
+        'purpose': 'Replacement workshop', 'guest_count': 10,
+    })
+    assert 'Hire confirmed' in replacement.text
+
+
+def test_started_hire_stays_reserved(upcoming_booking):
+    db, client, _ = upcoming_booking
+    hire = HireRequest(user_id=1, venue_id=2, start_at=now_utc()-timedelta(minutes=10),
+                       end_at=now_utc()+timedelta(hours=1), purpose='Ongoing workshop',
+                       guest_count=10, status='confirmed')
+    db.add(hire)
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('1'))
+    page = client.get('/hire')
+    url = f'/hire/{hire.id}/cancel'
+    assert url not in page.text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
+    assert 'only be cancelled before they start' in client.post(url, data={'csrf': csrf}).text
+    assert hire.status == 'confirmed'
+
+
 def test_admin_activity_records_hire_decisions_and_event_cancellation(upcoming_booking):
     db, client, booking = upcoming_booking
     start = booking.event.end_at + timedelta(days=1)

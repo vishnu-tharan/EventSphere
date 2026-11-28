@@ -22,6 +22,7 @@ PERFORMATIVES = {'REQUEST', 'AGREE', 'REFUSE', 'PROPOSE', 'INFORM', 'FAILURE'}
 BUFFER_MINUTES = 30
 HOLD_MINUTES = 5
 MAX_TICKETS = 6
+RESERVED_HIRE_STATUSES = ('pending', 'confirmed')
 
 
 def result(performative: str, **content):
@@ -115,7 +116,7 @@ def venue_busy_periods(venue_id, after, before=None, exclude_event=None):
     events = select(Event.start_at, Event.end_at).where(
         Event.venue_id == venue_id, Event.status == 'published', Event.end_at > after)
     hires = select(HireRequest.start_at, HireRequest.end_at).where(
-        HireRequest.venue_id == venue_id, HireRequest.status.in_(['confirmed', 'pending']),
+        HireRequest.venue_id == venue_id, HireRequest.status.in_(RESERVED_HIRE_STATUSES),
         HireRequest.end_at > after)
     if before is not None:
         events = events.where(Event.start_at < before)
@@ -174,6 +175,20 @@ class VenueAgent:
                     return result('REFUSE', reason='Venue has a conflict and no suitable free alternative')
                 return result('PROPOSE', reason='Venue has a conflicting activity or 30-minute buffer', alternatives=alt)
             return result('AGREE', reason='Venue available including 30-minute turnaround buffer')
+        if action == 'cancel_hire':
+            hire = lock_row(db, HireRequest, int(p['hire_id']))
+            if hire is None or hire.user_id != int(p['user_id']):
+                return result('REFUSE', reason='Venue hire not found')
+            if hire.status not in RESERVED_HIRE_STATUSES:
+                return result('REFUSE', reason='Only pending or confirmed hires can be cancelled')
+            if hire.start_at <= now_utc():
+                return result('REFUSE', reason='Venue hires can only be cancelled before they start')
+            hire.status = 'cancelled'
+            bus.send('VenueAgent', 'ALL', 'INFORM', {
+                'user_id': hire.user_id,
+                'text': f'Venue hire #{hire.id} for {hire.venue.name} was cancelled. The time slot has been released.',
+            }, cid)
+            return result('AGREE', reason='Venue hire cancelled. The time slot has been released.')
         if action in ['request_hire', 'accept_alternative']:
             existing = lock_row(db, HireRequest, int(p['hire_id'])) if action == 'accept_alternative' else None
             if action == 'accept_alternative' and (not existing or existing.status != 'proposed' or existing.user_id != int(p.get('user_id', 0))):
