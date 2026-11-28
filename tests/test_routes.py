@@ -728,3 +728,28 @@ def test_admin_cannot_approve_a_hire_once_it_starts(upcoming_booking):
         assert hire.status == 'pending'
     assert db.scalar(select(AdminActivity)) is None
     assert db.scalars(select(Notification.id)).all() == before_notices
+
+
+def test_venue_capacity_changes_ignore_ended_events(upcoming_booking):
+    db, client, booking = upcoming_booking
+    event = booking.event
+    client.cookies.set('session', auth_signer.dumps('3'))
+    page = client.get('/admin/venues/1/edit').text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+    form = {'csrf': csrf, 'venue_id': 1, 'name': 'Hall', 'location': 'Campus',
+            'capacity': 4, 'hourly_rate': 1000, 'hire_open': 'true'}
+    assert client.post('/admin/venues/save', data=form).status_code == 409
+    db.rollback()
+
+    event.start_at = now_utc() - timedelta(hours=1)
+    event.end_at = now_utc() + timedelta(hours=1)
+    db.commit()
+    assert client.post('/admin/venues/save', data=form).status_code == 409
+    db.rollback()
+
+    event.end_at = now_utc() - timedelta(minutes=30)
+    db.commit()
+    response = client.post('/admin/venues/save', data=form, follow_redirects=False)
+    assert response.status_code == 303
+    assert event.venue.capacity == 4
+    assert booking.category.quantity == 5 and booking.status == 'paid'

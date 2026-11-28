@@ -690,14 +690,15 @@ def venue_save(request: Request,venue_id: int=Form(0),name: str=Form(...),
     venue=lock_row(db, Venue, venue_id) if venue_id else Venue()
     if venue_id and not venue:raise HTTPException(404,'Venue not found')
     if venue_id:
+        instant = now_utc()
         over_capacity = db.scalar(select(Event.id).join(TicketCategory).where(
-            Event.venue_id == venue.id, Event.status.in_(['draft', 'published']))
+            Event.venue_id == venue.id, Event.status.in_(['draft', 'published']), Event.end_at >= instant)
             .group_by(Event.id).having(func.sum(TicketCategory.quantity) > capacity).limit(1))
         if over_capacity is not None:
             raise HTTPException(409, 'Capacity is below the ticket allocation of an existing event')
         over_capacity_hire = db.scalar(select(HireRequest.id).where(
             HireRequest.venue_id == venue.id, HireRequest.status.in_(['confirmed', 'pending']),
-            HireRequest.end_at > now_utc(), HireRequest.guest_count > capacity).limit(1))
+            HireRequest.end_at > instant, HireRequest.guest_count > capacity).limit(1))
         if over_capacity_hire is not None:
             raise HTTPException(409, 'Capacity is below the guest count of an existing hire')
     if not venue_id:db.add(venue)
