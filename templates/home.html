@@ -33,7 +33,7 @@
         <h3 class="h5">{{event.title}}</h3>
         <p class="event-time">{{fmt(event.start_at)}}</p>
         <p class="event-venue">{{event.venue.name}}<br>{{event.venue.location}}</p>
-        <a href="/events/{{event.id}}" class="btn btn-outline-dark mt-auto">View tickets<span class="visually-hidden"> for {{event.title}}</span></a>
+        <a href="/events/{{event.id}}" class="btn btn-outline-dark mt-auto">{{ 'View tickets' if event.start_at > now else 'View event' }}<span class="visually-hidden"> for {{event.title}}</span></a>
       </div>
     </article>
     {% else %}

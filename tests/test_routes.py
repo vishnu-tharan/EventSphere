@@ -753,3 +753,22 @@ def test_venue_capacity_changes_ignore_ended_events(upcoming_booking):
     assert response.status_code == 303
     assert event.venue.capacity == 4
     assert booking.category.quantity == 5 and booking.status == 'paid'
+
+
+def test_closed_event_shows_booking_status_to_signed_out_visitors(upcoming_booking):
+    db, client, booking = upcoming_booking
+    assert 'Sign in to book' in client.get('/events/1').text
+    event = booking.event
+    event.start_at = now_utc() - timedelta(hours=2)
+    event.end_at = now_utc() + timedelta(hours=1)
+    db.commit()
+    started = client.get('/events/1').text
+    assert 'Booking is closed for this event.' in started and 'Sign in to book' not in started
+
+    event.end_at = now_utc() - timedelta(hours=1)
+    db.commit()
+    ended = client.get('/events/1').text
+    assert 'Booking is closed for this event.' in ended and 'Sign in to book' not in ended
+    assert 'View event<span' in client.get('/').text
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert 'action="/book/' not in client.get('/events/1').text
