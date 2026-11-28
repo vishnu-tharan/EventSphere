@@ -454,6 +454,25 @@ class WaitlistAgent:
             db.add(entry); db.flush()
             self._offer(bus,category_id,cid)
             return result('AGREE',reason='Added to first-come-first-served waitlist',waitlist_id=entry.id)
+        if action == 'leave':
+            entry = db.get(WaitlistEntry, int(p['entry_id']))
+            user_id = int(p['user_id'])
+            if entry is None or entry.user_id != user_id:
+                return result('REFUSE', reason='Waitlist entry not found')
+            category = db.get(TicketCategory, entry.category_id)
+            event = lock_row(db, Event, category.event_id)
+            db.refresh(entry)
+            if event.status != 'published' or entry.status not in ('waiting', 'offered'):
+                return result('REFUSE', reason='This waitlist entry is no longer active')
+            release_hold = entry.status == 'offered'
+            entry.status = 'withdrawn'
+            entry.expires_at = None
+            if release_hold:
+                db.execute(update(TicketCategory).where(TicketCategory.id == category.id)
+                           .values(remaining=TicketCategory.remaining + entry.quantity))
+            self._offer(bus, category.id, cid)
+            return result('AGREE', reason='You left the waitlist. Your ticket hold was released.' if release_hold
+                          else 'You left the waitlist.')
         if action=='seats_freed':
             n=self._offer(bus,int(p['category_id']),cid)
             return result('INFORM',reason='Released seats offered to first waiting customers',offers=n)

@@ -5,7 +5,8 @@
 <div class="card p-4"><span class="category-pill align-self-start">{{event.category}}</span><h1 class="mt-3">{{event.title}}</h1><p>{{event.description}}</p><p class="mb-1"><b>Venue:</b> {{event.venue.name}}, {{event.venue.location}}</p><p class="mb-1"><b>Starts:</b> {{fmt(event.start_at)}}</p><p class="mb-1"><b>Ends:</b> {{fmt(event.end_at)}}</p><p class="text-muted small mt-3">Capacity: {{event.venue.capacity}} people</p></div>
 </div><div class="col-lg-5"><h2 class="h4">Choose tickets</h2>
 {% for cat in event.ticket_categories %}
-{% set hold = holds.get(cat.id) %}
+{% set entry = waitlist.get(cat.id) %}
+{% set hold = entry if entry and entry.status == 'offered' and entry.expires_at and entry.expires_at > now else none %}
 <div class="card p-3 mb-3"><div class="d-flex justify-content-between"><div><b>{{cat.name}}</b><div class="small text-muted">{{cat.remaining}} / {{cat.quantity}} left</div></div><b>LKR {{'%.2f'|format(cat.price)}}</b></div>
 {% if user and user.role=='attendee' and event.start_at>now %}
 {% if hold %}
@@ -18,7 +19,17 @@
 </form>
 {% else %}
 <form method="post" action="/book/{{cat.id}}" class="d-flex gap-2 mt-3"><input type="hidden" name="csrf" value="{{csrf}}"><input type="number" class="form-control" name="quantity" min="1" max="6" value="1" aria-label="Number of tickets" style="max-width:95px"><button class="btn btn-dark flex-grow-1" {% if cat.remaining==0 %}disabled{% endif %}>Book tickets</button></form>
+{% if not entry %}
 <form method="post" action="/waitlist/{{cat.id}}" class="d-flex gap-2 mt-2"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="quantity" value="1"><button class="btn btn-outline-secondary w-100">Join waitlist (1 ticket)</button></form>
+{% endif %}
+{% endif %}
+{% if entry %}
+<form method="post" action="/waitlist/{{entry.id}}/leave" class="mt-2">
+  <input type="hidden" name="csrf" value="{{csrf}}">
+  {% if entry.status == 'waiting' %}<p class="small mb-2">You’re on the waitlist.</p>{% endif %}
+  {% if entry.status == 'offered' and not hold %}<p class="small mb-2">Your ticket hold has expired.</p>{% endif %}
+  <button class="btn btn-outline-secondary w-100">Leave waitlist</button>
+</form>
 {% endif %}
 {% elif not user %}<a class="btn btn-dark mt-3" href="/login">Sign in to book</a>{% else %}<div class="text-muted small mt-2">Booking is closed for this event.</div>{% endif %}
 </div>

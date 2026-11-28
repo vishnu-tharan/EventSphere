@@ -515,3 +515,32 @@ def test_published_schedule_checks_conflicts_and_notifies_each_attendee_once(upc
     db.commit()
     assert 'Schedule changes close' in client.post(path, data=form).text
     assert path not in client.get('/admin').text
+
+
+def test_leaving_waitlist_releases_hold_once_and_offers_it_to_next_attendee(upcoming_booking):
+    db, client, booking = upcoming_booking
+    booking.category.remaining = 0
+    held = WaitlistEntry(user_id=1, category_id=1, quantity=1, status='offered',
+                         expires_at=now_utc() + timedelta(minutes=5))
+    queued = WaitlistEntry(user_id=2, category_id=1, quantity=1, status='waiting')
+    db.add_all([held, queued])
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('2'))
+    page = client.get('/events/1').text
+    assert 'You’re on the waitlist' in page
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+    assert client.post(f'/waitlist/{held.id}/leave', data={'csrf': csrf}).status_code == 404
+
+    client.cookies.set('session', auth_signer.dumps('1'))
+    response = client.post(f'/waitlist/{held.id}/leave', data={'csrf': csrf})
+    assert 'Your ticket hold was released' in response.text
+    db.expire_all()
+    assert (held.status, queued.status, booking.category.remaining) == ('withdrawn', 'offered', 0)
+    assert 'no longer active' in client.post(f'/waitlist/{held.id}/leave', data={'csrf': csrf}).text
+    assert booking.category.remaining == 0
+
+    client.cookies.set('session', auth_signer.dumps('2'))
+    assert 'Claim 1 held ticket(s)' in client.get('/events/1').text
+    assert 'You left the waitlist' in client.post(f'/waitlist/{queued.id}/leave', data={'csrf': csrf}).text
+    db.expire_all()
+    assert queued.status == 'withdrawn' and booking.category.remaining == 1

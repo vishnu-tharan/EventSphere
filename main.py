@@ -232,15 +232,15 @@ def event_page(event_id: int, request: Request, note: str='', db: Session=Depend
     if not event or event.status!='published':
         raise HTTPException(404,'Published event not found')
     user = get_user(request, db)
-    holds = {}
+    waitlist = {}
     if user and user.role == 'attendee':
-        offers = db.scalars(select(WaitlistEntry).join(TicketCategory).where(
+        entries = db.scalars(select(WaitlistEntry).join(TicketCategory).where(
             TicketCategory.event_id == event.id, WaitlistEntry.user_id == user.id,
-            WaitlistEntry.status == 'offered', WaitlistEntry.expires_at > now_utc())
+            WaitlistEntry.status.in_(['waiting', 'offered']))
             .order_by(WaitlistEntry.created_at, WaitlistEntry.id))
-        for offer in offers:
-            holds.setdefault(offer.category_id, offer)
-    return page(request, 'event.html', db, event=event, note=note, holds=holds)
+        for entry in entries:
+            waitlist.setdefault(entry.category_id, entry)
+    return page(request, 'event.html', db, event=event, note=note, waitlist=waitlist)
 
 
 @app.post('/book/{category_id}')
@@ -320,6 +320,22 @@ def join_waitlist(category_id: int,request: Request,quantity: int=Form(1),csrf: 
         'action':'join','user_id':user.id,'category_id':category_id,'quantity':quantity})
     db.commit()
     return back(f'/events/{cat.event_id}',answer['content'].get('reason','Waitlist updated'))
+
+
+@app.post('/waitlist/{entry_id}/leave')
+def leave_waitlist(entry_id: int, request: Request, csrf: str=Form(...), db: Session=Depends(get_db)):
+    check_csrf(request, csrf)
+    user = require_role(request, db, 'attendee')
+    entry = db.get(WaitlistEntry, entry_id)
+    if entry is None or entry.user_id != user.id:
+        raise HTTPException(404, 'Waitlist entry not found')
+    event = entry.category.event
+    answer = MessageBus(db).send('Website', 'WaitlistAgent', 'REQUEST', {
+        'action': 'leave', 'entry_id': entry_id, 'user_id': user.id,
+    })
+    db.commit()
+    target = f'/events/{event.id}' if event.status == 'published' else '/notifications'
+    return back(target, answer['content']['reason'])
 
 
 @app.get('/notifications')
