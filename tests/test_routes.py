@@ -332,3 +332,50 @@ def test_dashboard_filters_event_statuses_and_opens_pending_hires(upcoming_booki
     assert 'No events match your search.' in client.get('/admin', params={'q': '%'}).text
     pending = client.get('/admin/hires', params={'status': 'pending'}).text
     assert 'Pending request' in pending and 'Confirmed request' not in pending
+
+
+def test_draft_edit_prefills_and_saves_details_before_publish(setup_db, monkeypatch):
+    with setup_db() as db:
+        event = db.get(Event, 1)
+        event.status = 'draft'
+        event.category = 'Campus lecture'
+        event.ticket_categories.append(TicketCategory(name='VIP', price=500, quantity=3, remaining=3))
+        db.commit()
+        monkeypatch.setitem(app.dependency_overrides, get_db, lambda: db)
+
+        with TestClient(app) as client:
+            client.cookies.set('session', auth_signer.dumps('3'))
+            edit_path = '/admin/events/1/edit'
+            assert edit_path in client.get('/admin').text
+            edit = client.get(edit_path)
+            assert edit.status_code == 200
+            assert 'value="Event A"' in edit.text and 'value="VIP"' in edit.text
+            assert '<option selected>Campus lecture</option>' in edit.text
+            assert for_input(event.start_at) in edit.text
+            csrf = re.search(r'name="csrf" value="([^"]+)"', edit.text)[1]
+            start = event.start_at + timedelta(days=1)
+            end = event.end_at + timedelta(days=1)
+            form = {
+                'csrf': csrf, 'title': 'Research workshop', 'category': 'Workshop',
+                'venue_id': 2, 'start_at': for_input(start), 'end_at': for_input(end),
+                'description': 'Updated workshop', 'ticket1_name': 'Student',
+                'ticket1_price': 300, 'ticket1_quantity': 25, 'ticket2_quantity': 0,
+            }
+            invalid = client.post(edit_path, data={**form, 'ticket1_quantity': 41})
+            assert invalid.status_code == 400
+            db.rollback()
+            assert event.title == 'Event A'
+            assert 'Draft event updated' in client.post(edit_path, data=form).text
+            db.expire_all()
+            assert (event.title, event.category, event.venue_id, event.description) == (
+                'Research workshop', 'Workshop', 2, 'Updated workshop')
+            assert event.start_at == start.replace(second=0, microsecond=0)
+            assert event.end_at == end.replace(second=0, microsecond=0)
+            assert [(t.id, t.name, t.price, t.quantity, t.remaining) for t in event.ticket_categories] == [
+                (1, 'Student', 300, 25, 25)]
+
+            assert 'Event published' in client.post('/admin/events/1/publish', data={'csrf': csrf}).text
+            assert client.get(edit_path).status_code == 404
+            assert client.post(edit_path, data=form).status_code == 404
+            client.cookies.set('session', auth_signer.dumps('1'))
+            assert client.get(edit_path).status_code == 403

@@ -2,6 +2,7 @@
 import asyncio
 import io
 import json
+import math
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -482,31 +483,57 @@ def venue_save(request: Request,venue_id: int=Form(0),name: str=Form(...),
     return back('/admin/venues')
 
 
+@app.get('/admin/events/{event_id}/edit')
 @app.get('/admin/events/new')
-def event_create_page(request: Request,db: Session=Depends(get_db)):
-    require_role(request,db,'admin')
-    venues=db.scalars(select(Venue)).all()
-    return page(request,'event_form.html',db,venues=venues)
+def event_form(request: Request, db: Session=Depends(get_db), event_id: int | None=None):
+    require_role(request, db, 'admin')
+    event = None
+    tickets = []
+    if event_id is not None:
+        event = db.get(Event, event_id)
+        if event is None or event.status != 'draft':
+            raise HTTPException(404, 'Draft event not found')
+        tickets = sorted(event.ticket_categories, key=lambda ticket: ticket.id)
+    venues = db.scalars(select(Venue).order_by(Venue.name, Venue.id)).all()
+    return page(request, 'event_form.html', db, venues=venues, event=event, tickets=tickets)
 
 
+@app.post('/admin/events/{event_id}/edit')
 @app.post('/admin/events/new')
-def event_create(request: Request,title: str=Form(...),category: str=Form(...),
+def event_save(request: Request,title: str=Form(...),category: str=Form(...),
                  venue_id: int=Form(...),start_at: str=Form(...),end_at: str=Form(...),
                  description: str=Form(''),status: str=Form('draft'),
                  ticket1_name: str=Form(...),ticket1_price: float=Form(...),ticket1_quantity: int=Form(...),
                  ticket2_name: str=Form(''),ticket2_price: float=Form(0),ticket2_quantity: int=Form(0),
-                 csrf: str=Form(...),db: Session=Depends(get_db)):
+                 csrf: str=Form(...),db: Session=Depends(get_db), event_id: int | None=None):
     check_csrf(request,csrf)
     require_role(request,db,'admin')
+    event = None
+    if event_id is not None:
+        event = lock_row(db, Event, event_id)
+        if event is None or event.status != 'draft':
+            raise HTTPException(404, 'Draft event not found')
+        if status != 'draft':
+            raise HTTPException(400, 'Save changes before publishing the draft')
+    existing = sorted(event.ticket_categories, key=lambda ticket: ticket.id) if event else []
+    if len(existing) > 2:
+        raise HTTPException(409, 'This draft has more than two ticket categories')
     venue=lock_row(db, Venue, venue_id)
     if not venue:raise HTTPException(404,'Venue not found')
     if status not in ('draft','published'):raise HTTPException(400,'Incorrect event status')
     starts=to_utc(start_at);ends=to_utc(end_at)
     if ends<=starts:raise HTTPException(400,'End time must be later')
-    if ticket1_quantity<=0 or ticket1_price<0 or ticket2_quantity<0 or ticket2_price<0:
+    if (ticket1_quantity <= 0 or ticket2_quantity < 0
+            or not all(math.isfinite(price) and price >= 0 for price in (ticket1_price, ticket2_price))):
         raise HTTPException(400,'Invalid ticket quantity/price')
-    if not ticket1_name.strip() or (ticket2_quantity > 0 and not ticket2_name.strip()):
-        raise HTTPException(400, 'Enter a name for each ticket category')
+    title, category = title.strip(), category.strip()
+    if not 1 <= len(title) <= 180 or not 1 <= len(category) <= 80:
+        raise HTTPException(400, 'Enter a title and category within the allowed lengths')
+    allocations = [(ticket1_name.strip(), ticket1_price, ticket1_quantity)]
+    if ticket2_quantity > 0:
+        allocations.append((ticket2_name.strip(), ticket2_price, ticket2_quantity))
+    if any(not 1 <= len(name) <= 100 for name, _, _ in allocations):
+        raise HTTPException(400, 'Enter a name of up to 100 characters for each ticket category')
     ticket_quantity = ticket1_quantity + ticket2_quantity
     if ticket_quantity > venue.capacity:
         raise HTTPException(400,'Ticket quantities exceed venue capacity')
@@ -518,16 +545,26 @@ def event_create(request: Request,title: str=Form(...),category: str=Form(...),
         if decision['performative'] != 'AGREE':
             db.commit()
             raise HTTPException(409, decision['content'].get('reason', 'Venue conflict'))
-    event=Event(title=title,category=category,venue_id=venue_id,start_at=starts,end_at=ends,
-                description=description,status=status)
-    db.add(event);db.flush()
-    db.add(TicketCategory(event_id=event.id,name=ticket1_name,price=ticket1_price,
-                          quantity=ticket1_quantity,remaining=ticket1_quantity))
-    if ticket2_name.strip() and ticket2_quantity>0:
-        db.add(TicketCategory(event_id=event.id,name=ticket2_name,price=ticket2_price,
-                              quantity=ticket2_quantity,remaining=ticket2_quantity))
+    if event is None:
+        event = Event(status=status)
+        db.add(event)
+    event.title = title
+    event.category = category
+    event.venue_id = venue.id
+    event.start_at, event.end_at = starts, ends
+    event.description = description
+    for index, (name, price, quantity) in enumerate(allocations):
+        if index < len(existing):
+            ticket = existing[index]
+        else:
+            ticket = TicketCategory()
+            event.ticket_categories.append(ticket)
+        ticket.name, ticket.price = name, price
+        ticket.quantity = ticket.remaining = quantity
+    for ticket in existing[len(allocations):]:
+        event.ticket_categories.remove(ticket)
     db.commit()
-    return back('/admin','Event created as '+status)
+    return back('/admin', 'Draft event updated' if event_id is not None else 'Event created as ' + status)
 
 
 @app.post('/admin/events/{event_id}/publish')

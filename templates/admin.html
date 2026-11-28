@@ -3,6 +3,7 @@
 {% macro actions(row) %}
   <div class="d-flex flex-wrap align-items-center gap-2">
     {% if row.status == 'draft' %}
+    <a class="btn btn-sm btn-outline-dark" href="/admin/events/{{row.event.id}}/edit">Edit draft</a>
     <form method="post" action="/admin/events/{{row.event.id}}/publish">
       <input type="hidden" name="csrf" value="{{csrf}}">
       <button class="btn btn-sm btn-outline-success">Publish</button>

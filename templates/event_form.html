@@ -1,10 +1,76 @@
-{% extends 'base.html' %}{% block title %}Create event{% endblock %}{% block content %}
-<h1 class="h2">Create new event</h1><div class="card p-4" style="max-width:790px"><form method="post" action="/admin/events/new"><input type="hidden" name="csrf" value="{{csrf}}">
-<div class="row g-3"><div class="col-md-8"><label class="form-label">Event title</label><input name="title" class="form-control" required></div><div class="col-md-4"><label class="form-label">Category</label><select name="category" class="form-select"><option>Concert</option><option>Workshop</option><option>Seminar</option><option>Conference</option><option>Other</option></select></div>
-<div class="col-12"><label class="form-label">Venue</label><select name="venue_id" class="form-select">{% for v in venues %}<option value="{{v.id}}">{{v.name}} (capacity {{v.capacity}})</option>{% endfor %}</select></div>
-<div class="col-md-6"><label class="form-label">Start time (Sri Lanka)</label><input type="datetime-local" name="start_at" class="form-control" required></div><div class="col-md-6"><label class="form-label">End time (Sri Lanka)</label><input type="datetime-local" name="end_at" class="form-control" required></div>
-<div class="col-12"><label class="form-label">Description</label><textarea name="description" class="form-control"></textarea></div></div>
-<h2 class="h5 mt-4">Ticket category 1 (required)</h2><div class="row g-2"><div class="col-md-4"><input name="ticket1_name" class="form-control" placeholder="Standard" value="Standard" required></div><div class="col-md-4"><input name="ticket1_price" type="number" min="0" step="0.01" class="form-control" placeholder="Price" value="1000" required></div><div class="col-md-4"><input name="ticket1_quantity" type="number" min="1" class="form-control" placeholder="Quantity" value="50" required></div></div>
-<h2 class="h5 mt-4">Ticket category 2 (optional)</h2><div class="row g-2"><div class="col-md-4"><input name="ticket2_name" class="form-control" placeholder="VIP"></div><div class="col-md-4"><input name="ticket2_price" type="number" min="0" step="0.01" class="form-control" placeholder="Price" value="0"></div><div class="col-md-4"><input name="ticket2_quantity" type="number" min="0" class="form-control" placeholder="Quantity" value="0"></div></div>
-<label class="form-label mt-4">Save as</label><select name="status" class="form-select mb-3"><option value="draft">Draft</option><option value="published">Publish now (VenueAgent checks conflicts)</option></select><button class="btn btn-dark">Save event</button></form></div>
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit draft' if event else 'Create event' }}{% endblock %}
+{% block content %}
+<a href="/admin" class="small">Back to dashboard</a>
+<h1 class="h2 mt-2">{{ 'Edit draft event' if event else 'Create new event' }}</h1>
+<div class="card p-3 p-md-4 event-editor">
+  <form method="post" action="{{ '/admin/events/' ~ event.id ~ '/edit' if event else '/admin/events/new' }}">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+    <div class="row g-3">
+      <div class="col-md-8">
+        <label class="form-label" for="event-title">Event title</label>
+        <input id="event-title" name="title" class="form-control" value="{{event.title if event else ''}}" maxlength="180" required>
+      </div>
+      <div class="col-md-4">
+        {% set categories = ['Concert', 'Workshop', 'Seminar', 'Conference', 'Other'] %}
+        <label class="form-label" for="event-category">Category</label>
+        <select id="event-category" name="category" class="form-select" required>
+          {% if event and event.category not in categories %}<option selected>{{event.category}}</option>{% endif %}
+          {% for category in categories %}<option{% if event and event.category == category %} selected{% endif %}>{{category}}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="event-venue">Venue</label>
+        <select id="event-venue" name="venue_id" class="form-select" required>
+          {% for venue in venues %}<option value="{{venue.id}}"{% if event and event.venue_id == venue.id %} selected{% endif %}>{{venue.name}} (capacity {{venue.capacity}})</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="event-start">Start time (Sri Lanka)</label>
+        <input id="event-start" type="datetime-local" name="start_at" class="form-control" value="{{for_input(event.start_at) if event else ''}}" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="event-end">End time (Sri Lanka)</label>
+        <input id="event-end" type="datetime-local" name="end_at" class="form-control" value="{{for_input(event.end_at) if event else ''}}" required>
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="event-description">Description</label>
+        <textarea id="event-description" name="description" class="form-control">{{event.description if event else ''}}</textarea>
+      </div>
+    </div>
+    {% for number in (1, 2) %}
+    {% set ticket = tickets[number - 1] if tickets|length >= number else none %}
+    {% set primary = number == 1 %}
+    <fieldset class="mt-4">
+      <legend class="h5">Ticket category {{number}}{% if not primary %} (optional){% endif %}</legend>
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label" for="ticket{{number}}-name">Name</label>
+          <input id="ticket{{number}}-name" name="ticket{{number}}_name" class="form-control" maxlength="100"
+                 value="{{ticket.name if ticket else ('Standard' if primary else '')}}"{% if primary %} required{% endif %}>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="ticket{{number}}-price">Price (LKR)</label>
+          <input id="ticket{{number}}-price" name="ticket{{number}}_price" type="number" min="0" step="0.01" class="form-control"
+                 value="{{'%.2f'|format(ticket.price) if ticket else (1000 if primary else 0)}}" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="ticket{{number}}-quantity">Quantity</label>
+          <input id="ticket{{number}}-quantity" name="ticket{{number}}_quantity" type="number" min="{{1 if primary else 0}}" class="form-control"
+                 value="{{ticket.quantity if ticket else (50 if primary else 0)}}" required>
+        </div>
+      </div>
+      {% if not primary and ticket %}<p class="form-text mb-0">Set the quantity to zero to remove this category.</p>{% endif %}
+    </fieldset>
+    {% endfor %}
+    {% if not event %}
+    <label class="form-label mt-4" for="save-status">Save as</label>
+    <select id="save-status" name="status" class="form-select">
+      <option value="draft">Draft</option>
+      <option value="published">Publish now (VenueAgent checks conflicts)</option>
+    </select>
+    {% endif %}
+    <button class="btn btn-dark mt-3">{{ 'Save draft' if event else 'Save event' }}</button>
+  </form>
+</div>
 {% endblock %}
