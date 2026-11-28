@@ -119,7 +119,7 @@ The test suite covers the agents, concurrency, QR issuance and check-in, booking
 
 1. **Admin:** Login, create/edit venue, create event (draft → publish), confirm conflict is refused, view dashboard/messages, approve hire.
 2. **Attendee:** Search/filter events, book Standard or VIP tickets, view per-ticket QR, payment reference, cancellation/refund, join waitlist and private hire.
-3. **Staff:** Open `/staff/scanner`, select event, scan phone QR or manually type code; test double scan and wrong event.
+3. **Staff** — Open `/staff/scanner`, choose an event, and scan a QR code or enter a ticket code. The scanner keeps the event selected after an accepted or rejected scan. Use **Change event** to switch.
 4. **Waitlist timer:** Sell out category, join queue, cancel someone's booking, see held seat/notification, wait 5 minutes; background sweep runs every 30 seconds to re-offer.
 
 To verify booking and check-in together, create an event starting in one hour. Book a ticket before it starts. Staff can scan it as soon as the check-in window opens, two hours before the event starts.

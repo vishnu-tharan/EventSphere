@@ -6,10 +6,10 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import qrcode
+from starlette.datastructures import URL
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -91,7 +91,7 @@ def page(request: Request, name: str, db: Session, **context):
 
 
 def back(url: str, note: str | None = None):
-    return RedirectResponse(url + ('?note=' + quote(note) if note else ''), status_code=303)
+    return RedirectResponse(URL(url).include_query_params(note=note) if note else url, status_code=303)
 
 
 async def waitlist_loop():
@@ -362,10 +362,10 @@ def accept_hire(hire_id: int,index: int,request: Request,csrf: str=Form(...),
 
 
 @app.get('/staff/scanner')
-def scanner(request: Request,note: str='',db: Session=Depends(get_db)):
+def scanner(request: Request,note: str='',db: Session=Depends(get_db), event_id: int | None=None):
     require_role(request,db,'staff','admin')
     events=db.scalars(select(Event).where(Event.status=='published').order_by(Event.start_at)).all()
-    return page(request,'scanner.html',db,events=events,note=note)
+    return page(request,'scanner.html',db,events=events,note=note,selected_event_id=event_id)
 
 
 @app.post('/staff/checkin')
@@ -377,7 +377,7 @@ def checkin(request: Request,event_id: int=Form(...),code: str=Form(...),
         'action':'checkin','event_id':event_id,'code':code})
     db.commit()
     label='ADMIT' if answer['performative']=='AGREE' else 'REJECT'
-    return back('/staff/scanner',label+': '+answer['content'].get('reason','Check complete'))
+    return back(f'/staff/scanner?event_id={event_id}',label+': '+answer['content'].get('reason','Check complete'))
 
 
 @app.get('/admin')
