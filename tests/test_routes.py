@@ -698,3 +698,33 @@ def test_admin_activity_records_hire_decisions_and_event_cancellation(upcoming_b
     assert [row.action for row in records] == ['Approved venue hire', 'Rejected venue hire', 'Cancelled event']
     assert all(row.admin_id == 3 and row.created_at for row in records)
     assert 'Simulated refunds issued: 1.' in client.get(history_path).text
+
+
+def test_admin_cannot_approve_a_hire_once_it_starts(upcoming_booking):
+    db, client, _ = upcoming_booking
+    instant = now_utc()
+    hires = [
+        HireRequest(user_id=1, venue_id=2, start_at=instant-timedelta(days=2),
+                    end_at=instant-timedelta(days=1), purpose='Ended hire',
+                    guest_count=30, status='pending'),
+        HireRequest(user_id=1, venue_id=2, start_at=instant-timedelta(minutes=15),
+                    end_at=instant+timedelta(hours=1), purpose='Ongoing hire',
+                    guest_count=30, status='pending'),
+    ]
+    db.add_all(hires)
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('3'))
+    page = client.get('/admin/hires', params={'status': 'pending'}).text
+    assert page.count('Approval closed') == len(hires)
+    csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+    before_notices = db.scalars(select(Notification.id)).all()
+    for hire in hires:
+        target = f'/admin/hires/{hire.id}/approve'
+        assert target not in page
+        response = client.post(target, data={'csrf': csrf})
+        assert response.status_code == 409
+        assert 'before their start time' in response.json()['detail']
+        db.rollback()
+        assert hire.status == 'pending'
+    assert db.scalar(select(AdminActivity)) is None
+    assert db.scalars(select(Notification.id)).all() == before_notices

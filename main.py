@@ -920,6 +920,8 @@ def decide_hire(hire_id: int,decision: str,request: Request,csrf: str=Form(...),
     hire=lock_row(db, HireRequest, hire_id)
     if not hire or hire.status!='pending' or decision not in ('approve','reject'):
         raise HTTPException(400,'Invalid pending request/decision')
+    if decision == 'approve' and hire.start_at <= now_utc():
+        raise HTTPException(409, 'Venue hires must be approved before their start time')
     hire.status='confirmed' if decision=='approve' else 'rejected'
     MessageBus(db).send('Admin','ALL','INFORM',{
         'user_id':hire.user_id,'text':f'Private hire #{hire.id} {hire.status} by admin.'})
