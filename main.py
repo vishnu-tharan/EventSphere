@@ -22,6 +22,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from agents import MessageBus
+from calendar_file import event_calendar
 from database import Base, engine, get_db, lock_row, SessionLocal
 from models import (AgentMessage, AgentState, Booking, Event, HireRequest, Notification,
                     Ticket, TicketCategory, User, Venue, WaitlistEntry, now_utc)
@@ -266,6 +267,21 @@ def bookings_page(request: Request,note: str='',db: Session=Depends(get_db)):
     user=require_role(request,db,'attendee')
     bookings=db.scalars(select(Booking).where(Booking.user_id==user.id).order_by(Booking.id.desc())).all()
     return page(request,'bookings.html',db,bookings=bookings,note=note)
+
+
+@app.get('/bookings/{booking_id}/calendar.ics')
+def download_calendar(booking_id: int, request: Request, db: Session=Depends(get_db)):
+    user = require_role(request, db, 'attendee')
+    booking = db.scalar(select(Booking).join(Booking.event).where(
+        Booking.id == booking_id, Booking.user_id == user.id, Booking.status == 'paid',
+        Event.status == 'published', Event.end_at >= now_utc(),
+    ).options(joinedload(Booking.event).joinedload(Event.venue)))
+    if booking is None:
+        raise HTTPException(404, 'Calendar download unavailable for this booking')
+    return Response(event_calendar(booking.event), media_type='text/calendar', headers={
+        'Content-Disposition': f'attachment; filename="event-{booking.event_id}.ics"',
+        'Cache-Control': 'private, no-store',
+    })
 
 
 @app.post('/bookings/{booking_id}/cancel')

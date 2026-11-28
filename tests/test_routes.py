@@ -419,3 +419,35 @@ def test_attendance_export_is_event_specific_and_admin_only(upcoming_booking):
     assert len(rows) == 3 and booking.tickets[0].code not in report
     empty = client.get(f'/admin/events/{other.id}/attendance.csv')
     assert len(empty.content.decode('utf-8-sig').splitlines()) == 1
+
+
+def test_calendar_download_uses_booked_event_details_and_utc(upcoming_booking):
+    db, client, booking = upcoming_booking
+    event = booking.event
+    event.title = 'தமிழ் இலக்கியச் சந்திப்பு, மாணவர் நிகழ்வு'
+    event.description = 'First line\r\nSecond line; bring a notebook'
+    event.venue.location = 'Pampaimadu, Vavuniya'
+    db.commit()
+    path = f'/bookings/{booking.id}/calendar.ics'
+
+    client.cookies.set('session', auth_signer.dumps('2'))
+    assert client.get(path).status_code == 404
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert path in client.get('/bookings').text
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/calendar')
+    assert response.headers['content-disposition'].endswith('event-1.ics"')
+    assert response.content.endswith(b'END:VCALENDAR\r\n')
+    assert max(map(len, response.content.split(b'\r\n'))) <= 75
+    details = response.content.replace(b'\r\n ', b'').decode()
+    assert f'DTSTART:{event.start_at:%Y%m%dT%H%M%SZ}\r\n' in details
+    assert f'DTEND:{event.end_at:%Y%m%dT%H%M%SZ}\r\n' in details
+    assert 'SUMMARY:' + event.title.replace(',', r'\,') + '\r\n' in details
+    assert r'LOCATION:Hall\, Pampaimadu\, Vavuniya' in details
+    assert r'DESCRIPTION:First line\nSecond line\; bring a notebook' in details
+
+    booking.status = 'cancelled'
+    db.commit()
+    assert path not in client.get('/bookings').text
+    assert client.get(path).status_code == 404

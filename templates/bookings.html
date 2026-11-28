@@ -6,9 +6,18 @@
 <p class="small mb-1">Payment reference: <code>{{booking.payment_ref}}</code></p>
 <p class="small mb-1">Total: LKR {{'%.2f'|format(booking.total)}}</p>
 {% if booking.status=='cancelled' %}<p class="small">Simulated refund: LKR {{'%.2f'|format(booking.refund_amount)}}</p>{% endif %}
-{% if booking.status == 'paid' and booking.event.status != 'cancelled' and now < booking.event.start_at
-      and not (booking.tickets | selectattr('status', 'equalto', 'checked_in') | first) %}
-<form method="post" action="/bookings/{{booking.id}}/cancel" class="mt-3"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel and apply the refund policy?')">Cancel booking</button></form>
+{% set can_add_to_calendar = booking.status == 'paid' and booking.event.status == 'published' and now <= booking.event.end_at %}
+{% set can_cancel = booking.status == 'paid' and booking.event.status != 'cancelled' and now < booking.event.start_at
+                    and not (booking.tickets | selectattr('status', 'equalto', 'checked_in') | first) %}
+{% if can_add_to_calendar or can_cancel %}
+<div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+{% if can_add_to_calendar %}
+<a class="btn btn-sm btn-outline-dark" href="/bookings/{{booking.id}}/calendar.ics">Add to calendar<span class="visually-hidden"> for {{booking.event.title}}</span></a>
+{% endif %}
+{% if can_cancel %}
+<form method="post" action="/bookings/{{booking.id}}/cancel"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel and apply the refund policy?')">Cancel booking</button></form>
+{% endif %}
+</div>
 {% endif %}
 </div><div class="col-lg-5"><div class="d-flex flex-wrap gap-3">
 {% for ticket in booking.tickets %}
