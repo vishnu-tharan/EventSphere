@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import qrcode
 from starlette.datastructures import URL
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
@@ -33,6 +33,7 @@ COOKIE_SECURE = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
 LOCAL_TZ = ZoneInfo(os.getenv('APP_TIMEZONE', 'Asia/Colombo'))
 auth_signer = URLSafeTimedSerializer(SECRET_KEY, salt='eventsphere-session')
 csrf_signer = URLSafeSerializer(SECRET_KEY, salt='eventsphere-csrf')
+scan_signer = URLSafeTimedSerializer(SECRET_KEY, salt='eventsphere-scan-result')
 templates = Jinja2Templates(directory='templates')
 
 
@@ -380,22 +381,36 @@ def accept_hire(hire_id: int,index: int,request: Request,csrf: str=Form(...),
 
 
 @app.get('/staff/scanner')
-def scanner(request: Request,note: str='',db: Session=Depends(get_db), event_id: int | None=None):
-    require_role(request,db,'staff','admin')
+def scanner(request: Request, db: Session=Depends(get_db), event_id: int | None=None, result: str=''):
+    user = require_role(request,db,'staff','admin')
     events=db.scalars(select(Event).where(Event.status=='published').order_by(Event.start_at)).all()
-    return page(request,'scanner.html',db,events=events,note=note,selected_event_id=event_id)
+    scan_result = None
+    if result:
+        try:
+            user_id, scanned_event, admitted, reason = scan_signer.loads(result, max_age=120)
+            if user_id == user.id and scanned_event == event_id:
+                scan_result = {'admitted': admitted, 'reason': reason}
+        except BadSignature:
+            pass
+    return page(request, 'scanner.html', db, events=events, selected_event_id=event_id,
+                scan_result=scan_result)
 
 
 @app.post('/staff/checkin')
 def checkin(request: Request,event_id: int=Form(...),code: str=Form(...),
-            csrf: str=Form(...),db: Session=Depends(get_db)):
+            csrf: str=Form(...),db: Session=Depends(get_db), camera: bool=Form(False)):
     check_csrf(request,csrf)
-    require_role(request,db,'staff','admin')
+    user = require_role(request,db,'staff','admin')
     answer=MessageBus(db).send('Scanner','TicketAgent','REQUEST',{
         'action':'checkin','event_id':event_id,'code':code})
     db.commit()
-    label='ADMIT' if answer['performative']=='AGREE' else 'REJECT'
-    return back(f'/staff/scanner?event_id={event_id}',label+': '+answer['content'].get('reason','Check complete'))
+    admitted = answer['performative'] == 'AGREE'
+    reason = 'Valid ticket' if admitted else answer['content'].get('reason', 'Ticket could not be checked in')
+    if camera:
+        return JSONResponse({'admitted': admitted, 'reason': reason}, headers={'Cache-Control': 'no-store'})
+    result = scan_signer.dumps([user.id, event_id, admitted, reason])
+    location = URL('/staff/scanner').include_query_params(event_id=event_id, result=result)
+    return RedirectResponse(location, status_code=303, headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/admin')

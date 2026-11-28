@@ -286,14 +286,32 @@ def test_scanner_keeps_selected_event_and_allows_switching(upcoming_booking):
     page = client.get('/staff/scanner')
     assert 'Event being entered' in page.text
     csrf = re.search(r'name="csrf" value="([^"]+)"', page.text)[1]
-    for event_id, expected in [(booking.event_id, 'ADMIT'), (booking.event_id, 'REJECT: Already used'),
-                               (other.id, 'REJECT: Wrong event')]:
+    for event_id, verdict, reason in [(booking.event_id, 'ADMIT', 'Valid ticket'),
+                                      (booking.event_id, 'REJECT', 'Already used'),
+                                      (other.id, 'REJECT', 'Wrong event')]:
         response = client.post('/staff/checkin', data={
             'csrf': csrf, 'event_id': event_id, 'code': booking.tickets[0].code})
-        assert expected in response.text
+        assert verdict in response.text and reason in response.text
         assert 'Change event' in response.text
         assert f'<option value="{event_id}" selected>' in response.text
         assert response.text.count(' selected>') == 1
+
+
+def test_camera_checkin_handles_multiple_tickets_in_same_session(upcoming_booking):
+    db, client, booking = upcoming_booking
+    db.get(User, 2).role = 'staff'
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('2'))
+    csrf = re.search(r'name="csrf" value="([^"]+)"', client.get('/staff/scanner').text)[1]
+    form = {'csrf': csrf, 'event_id': booking.event_id, 'camera': 'true'}
+    first, second = [ticket.code for ticket in booking.tickets]
+    checks = [(first, True), (first, False), (second, True)]
+    for code, admitted in checks:
+        response = client.post('/staff/checkin', data={**form, 'code': code})
+        assert response.status_code == 200 and response.json()['admitted'] is admitted
+    assert client.post('/staff/checkin', data={**form, 'code': second, 'csrf': 'invalid'}).status_code == 403
+    db.expire_all()
+    assert all(ticket.status == 'checked_in' for ticket in booking.tickets)
 
 
 def test_dashboard_filters_event_statuses_and_opens_pending_hires(upcoming_booking):

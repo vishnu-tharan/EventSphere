@@ -164,6 +164,8 @@ a, button, input, select, textarea { scroll-margin-block: 1rem; }
 .ticket-image img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: .45rem; background: white; }
 #reader { overflow: hidden; }
 
+.scan-result .alert { border-inline-start-width: .3rem; }
+
 @media (max-width: 1199.98px) {
   .site-nav .nav-link { display: flex; align-items: center; min-height: 44px; }
   .nav-account { border-top: 1px solid #ffffff36; margin-top: .5rem; padding-top: .75rem; }

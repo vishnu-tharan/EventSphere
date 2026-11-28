@@ -1,5 +1,6 @@
 {% extends 'base.html' %}{% block title %}Gate QR scanner{% endblock %}{% block content %}
-<h1 class="h2">Gate staff QR scanner</h1><p>Choose an event. The camera scanner needs an HTTPS site (or localhost). Manual entry also works.</p>
+<h1 class="h2">Gate staff QR scanner</h1>
+<p class="text-secondary">Choose the event before scanning or entering a ticket code.</p>
 <div class="card p-3 p-md-4">
   <form method="post" action="/staff/checkin" id="checkin-form">
     <input type="hidden" name="csrf" value="{{csrf}}">
@@ -8,46 +9,32 @@
       <option value="">Choose an event</option>
       {% for event in events %}<option value="{{event.id}}"{% if event.id == selected_event_id %} selected{% endif %}>{{event.title}} — {{fmt(event.start_at)}}</option>{% endfor %}
     </select>
+    <div id="scan-result" class="scan-result" role="status" aria-atomic="true">
+      <div id="scan-banner"{% if not scan_result %} hidden{% endif %}
+           class="alert {% if scan_result %}{{'alert-success' if scan_result.admitted else 'alert-danger'}}{% endif %}">
+        <strong id="scan-verdict" class="fs-4 d-block">{% if scan_result %}{{'ADMIT' if scan_result.admitted else 'REJECT'}}{% endif %}</strong>
+        <span id="scan-reason">{{scan_result.reason if scan_result else ''}}</span>
+      </div>
+    </div>
     <div class="row g-4">
       <div class="col-lg-6">
         <h2 class="h5">Camera scan</h2>
         <div id="reader" class="w-100"></div>
         <button class="btn btn-outline-dark w-100" id="start-camera" type="button">Start camera</button>
+        <button class="btn btn-outline-dark w-100" id="stop-camera" type="button" hidden>Stop camera</button>
         <p id="scanner-help" class="small text-muted mt-2 mb-0" role="status"></p>
       </div>
       <div class="col-lg-6">
         <h2 class="h5">Manual check-in</h2>
         <label class="form-label" for="ticket-code">Ticket code</label>
         <input class="form-control mb-3" id="ticket-code" name="code" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="Paste ticket code">
-        <button class="btn btn-dark w-100">Validate and check in</button>
+        <button class="btn btn-dark w-100" id="manual-checkin">Validate and check in</button>
       </div>
     </div>
   </form>
 </div>
 {% endblock %}
-{% block scripts %}<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><script>
-(function () {
- const start = document.getElementById('start-camera'); const help = document.getElementById('scanner-help');
- const eventField = document.getElementById('scan-event');
- start.addEventListener('click', async function () {
-   if (!eventField.reportValidity()) return;
-   if (typeof Html5Qrcode === 'undefined') {help.textContent='Scanner library unavailable. Use manual code entry.';return;}
-   start.disabled = true;
-   try {
-     const qr = new Html5Qrcode('reader');
-     let submitting = false;
-     await qr.start({facingMode:'environment'}, {fps:8,qrbox:220}, function (text) {
-       if (submitting || !eventField.reportValidity()) return;
-       submitting = true;
-       document.getElementById('ticket-code').value=text;
-       qr.stop().catch(function(){});
-       document.getElementById('checkin-form').requestSubmit();
-     }, function () {});
-     help.textContent='Point the camera at a ticket QR code.';
-   } catch(e) {
-     start.disabled = false;
-     help.textContent='Cannot start camera. Allow camera access or enter the code manually.';
-   }
- });
-})();
-</script>{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="/static/scanner.js"></script>
+{% endblock %}
