@@ -1,28 +1,106 @@
 {% extends 'base.html' %}{% block title %}Admin dashboard{% endblock %}{% block content %}
-<div class="d-flex justify-content-between flex-wrap gap-2 align-items-center mb-3"><h1 class="h2">Organiser dashboard</h1><div class="d-flex gap-2"><a class="btn btn-dark" href="/admin/events/new">+ Event</a><a class="btn btn-outline-dark" href="/admin/venues">Manage venues</a></div></div>
-<h2 class="h5 mt-4">Event sales and check-ins</h2><div class="table-responsive"><table class="table table-striped align-middle"><thead><tr><th>Event</th><th>Status</th><th>Tickets sold</th><th>Sim. revenue (LKR)</th><th>Check-ins</th><th>Capacity</th><th>Actions</th></tr></thead><tbody>
-{% for row in stats %}<tr><td>{{row.event.title}}<div class="small text-muted">{{row.event.venue.name}}</div></td><td>{{row.event.status}}</td><td>{{row.sold}}</td><td>{{'%.2f'|format(row.revenue)}}</td><td>{{row.checkins}}</td><td>{{row.capacity}}</td><td>
-{% if row.event.status=='draft' %}<form method="post" action="/admin/events/{{row.event.id}}/publish"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-success">Publish</button></form>{% endif %}
-{% if row.event.status=='published' %}
-  {% if now > row.event.end_at %}<span class="text-muted">Event ended</span>
-  {% else %}<form method="post" action="/admin/events/{{row.event.id}}/cancel"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel</button></form>{% endif %}
-{% endif %}
-</td></tr>{% endfor %}</tbody></table></div>
-<h2 class="h5 mt-5">Agent persistent beliefs / counters</h2>
+{% set status_labels = {'upcoming': 'Upcoming', 'in-progress': 'In progress', 'ended': 'Event ended', 'draft': 'Draft', 'cancelled': 'Cancelled'} %}
+{% macro actions(row) %}
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    {% if row.status == 'draft' %}
+    <form method="post" action="/admin/events/{{row.event.id}}/publish">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <button class="btn btn-sm btn-outline-success">Publish</button>
+    </form>
+    {% elif row.status in ('upcoming', 'in-progress') %}
+    <form method="post" action="/admin/events/{{row.event.id}}/cancel">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancel event and refund all bookings?')">Cancel event</button>
+    </form>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+<header class="admin-header">
+  <h1 class="h2 mb-0">Organiser dashboard</h1>
+  <div class="admin-actions">
+    <a class="btn btn-dark" href="/admin/events/new">Create event</a>
+    <a class="btn btn-outline-dark" href="/admin/hires?status=pending">Pending hire requests <span class="badge rounded-pill text-bg-light">{{pending_hires}}</span></a>
+    <a class="btn btn-outline-dark" href="/admin/venues">Manage venues</a>
+  </div>
+</header>
+
+<section id="event-list" class="mt-4" aria-labelledby="admin-events-title">
+  <h2 class="h4 mb-1" id="admin-events-title">Event sales and check-ins</h2>
+  <form method="get" action="/admin#event-list" class="event-search admin-search" role="search" aria-label="Find events to manage">
+    <div><label class="form-label" for="event-query">Event name</label>
+      <input type="search" class="form-control" id="event-query" name="q" value="{{q}}" maxlength="180"></div>
+    <div><label class="form-label" for="event-status">Status</label>
+      <select class="form-select" id="event-status" name="status">
+        <option value="">All statuses</option>
+        {% for value, label in status_labels.items() %}<option value="{{value}}"{% if status == value %} selected{% endif %}>{{ 'Ended' if value == 'ended' else label }}</option>{% endfor %}
+      </select></div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <button class="btn btn-dark">Search</button>
+      {% if q or status %}<a class="btn btn-link" href="/admin#event-list">Clear</a>{% endif %}
+    </div>
+  </form>
+
+  {% if stats %}
+  <div class="table-responsive d-none d-lg-block">
+    <table class="table table-striped align-middle">
+      <thead><tr><th scope="col">Event</th><th scope="col">Starts (Sri Lanka)</th><th scope="col">Status</th><th scope="col">Attendance</th><th scope="col">Venue capacity</th><th scope="col">Sim. revenue (LKR)</th><th scope="col">Actions</th></tr></thead>
+      <tbody>
+      {% for row in stats %}
+        <tr>
+          <th scope="row" class="admin-event-name">{{row.event.title}}<div class="fw-normal small text-muted">{{row.event.venue.name}}</div></th>
+          <td>{{fmt(row.event.start_at)}}</td>
+          <td>{{status_labels[row.status]}}</td>
+          <td>{{row.checkins}} of {{row.sold}} tickets checked in</td>
+          <td>{{row.event.venue.capacity}}</td>
+          <td>{{'%.2f'|format(row.revenue)}}</td>
+          <td>{{actions(row)}}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="d-grid d-lg-none gap-3">
+    {% for row in stats %}
+    <article class="card p-3">
+      <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+        <h3 class="h5 mb-0">{{row.event.title}}</h3>
+        <span class="category-pill">{{status_labels[row.status]}}</span>
+      </div>
+      <p class="small text-muted mt-2 mb-2">{{fmt(row.event.start_at)}} (Sri Lanka)<br>{{row.event.venue.name}}</p>
+      <p class="mb-1">{{row.checkins}} of {{row.sold}} tickets checked in</p>
+      <p class="small text-muted mb-2">Venue capacity {{row.event.venue.capacity}} · Sim. revenue LKR {{'%.2f'|format(row.revenue)}}</p>
+      {{actions(row)}}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-events">{{ 'No events match your search.' if q or status else 'No events yet.' }}</p>
+  {% endif %}
+</section>
+
+{% set activity_filters = 'activity=true&q=' ~ (q|urlencode) ~ '&status=' ~ (status|urlencode) %}
+<details id="agent-activity" class="card mt-4 p-3"{% if show_activity %} open{% endif %}>
+<summary class="fw-semibold">Agent activity</summary>
+<h2 class="h5 mt-3">Agent persistent beliefs / counters</h2>
 <div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Agent</th><th>State key</th><th>Saved JSON value</th></tr></thead><tbody>
 {% for state in states %}<tr><td>{{state.agent}}</td><td>{{state.key}}</td><td><code class="code-small">{{state.value_json}}</code></td></tr>{% else %}<tr><td colspan="3">Timer/counter state appears after sweeps or rejected scans; business states also persist in bookings, venues, tickets and waitlists.</td></tr>{% endfor %}
 </tbody></table></div>
 <h2 class="h5 mt-5">Agent conversation log</h2>
-<form method="get" action="/admin" class="d-flex flex-wrap gap-2 mb-3" aria-label="Filter agent messages">
+<form method="get" action="/admin#agent-activity" class="d-flex flex-wrap gap-2 mb-3" aria-label="Filter agent messages">
+  <input type="hidden" name="activity" value="true">
+  <input type="hidden" name="q" value="{{q}}">
+  <input type="hidden" name="status" value="{{status}}">
   <label class="visually-hidden" for="conversation-id">Conversation ID</label>
   <input id="conversation-id" class="form-control w-auto" name="conversation_id" placeholder="Conversation ID" value="{{conversation_id}}">
   <button class="btn btn-outline-dark">Filter</button>
-  {% if conversation_id %}<a class="btn btn-link" href="/admin">Clear filter</a>{% endif %}
+  {% if conversation_id %}<a class="btn btn-link" href="/admin?{{activity_filters}}#agent-activity">Clear filter</a>{% endif %}
 </form>
 <div class="table-responsive log-table"><table class="table table-sm table-bordered"><thead><tr><th>When</th><th>From → To</th><th>Performative</th><th>Conversation ID</th><th>JSON content</th></tr></thead><tbody>{% for message in messages %}<tr><td class="small">{{fmt(message.created_at)}}</td><td class="small">{{message.sender}} → {{message.receiver}}</td><td><span class="badge text-bg-{{'danger' if message.performative=='REFUSE' else ('warning' if message.performative=='PROPOSE' else 'secondary')}}">{{message.performative}}</span></td><td><code class="code-small">{{message.conversation_id}}</code></td><td><pre class="small mb-0">{{message.content_json}}</pre></td></tr>{% endfor %}</tbody></table></div>
 {% if not messages %}<p class="text-muted">No agent messages match this view.</p>{% endif %}
 <nav class="d-flex flex-wrap gap-2 mt-3" aria-label="Agent log pages">
-{% if before %}<a class="btn btn-sm btn-outline-dark" href="/admin?conversation_id={{conversation_id|urlencode}}">Newest messages</a>{% endif %}
-{% if older_than %}<a class="btn btn-sm btn-outline-dark" href="/admin?conversation_id={{conversation_id|urlencode}}&amp;before={{older_than}}">Older messages</a>{% endif %}
+{% if before is not none %}<a class="btn btn-sm btn-outline-dark" href="/admin?{{activity_filters}}&amp;conversation_id={{conversation_id|urlencode}}#agent-activity">Newest messages</a>{% endif %}
+{% if older_than %}<a class="btn btn-sm btn-outline-dark" href="/admin?{{activity_filters}}&amp;conversation_id={{conversation_id|urlencode}}&amp;before={{older_than}}#agent-activity">Older messages</a>{% endif %}
 </nav>
+</details>
 {% endblock %}

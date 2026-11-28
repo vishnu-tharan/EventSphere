@@ -7,7 +7,7 @@ from sqlalchemy import select
 from main import app, auth_signer, for_input
 from database import get_db
 from agents import MessageBus
-from models import AgentMessage, Booking, Event, TicketCategory, User, WaitlistEntry, now_utc
+from models import AgentMessage, Booking, Event, HireRequest, TicketCategory, User, WaitlistEntry, now_utc
 
 
 def test_admin_and_scanner_refuse_wrong_roles(setup_db):
@@ -292,3 +292,43 @@ def test_scanner_keeps_selected_event_and_allows_switching(upcoming_booking):
         assert 'Change event' in response.text
         assert f'<option value="{event_id}" selected>' in response.text
         assert response.text.count(' selected>') == 1
+
+
+def test_dashboard_filters_event_statuses_and_opens_pending_hires(upcoming_booking):
+    db, client, booking = upcoming_booking
+    start = booking.event.start_at
+    end = booking.event.end_at
+    states = [
+        ('Active workshop', 'published', start - timedelta(hours=2), end),
+        ('Past workshop', 'published', start - timedelta(hours=3), start - timedelta(hours=2)),
+        ('Draft workshop', 'draft', start, end),
+        ('Cancelled workshop', 'cancelled', start, end),
+    ]
+    for title, state, starts, ends in states:
+        db.add(Event(title=title, category='Workshop', venue_id=1, start_at=starts,
+                     end_at=ends, status=state))
+    for state in ('pending', 'confirmed'):
+        db.add(HireRequest(user_id=1, venue_id=1, start_at=start, end_at=end,
+                           purpose=f'{state.title()} request', guest_count=10, status=state))
+    booking.tickets[0].status = 'checked_in'
+    db.commit()
+
+    client.cookies.set('session', auth_signer.dumps('3'))
+    dashboard = client.get('/admin').text
+    assert '1 of 2 tickets checked in' in dashboard
+    assert 'text-bg-light">1</span>' in dashboard
+    assert '<details id="agent-activity" class="card mt-4 p-3">' in dashboard
+    for state, title in [('upcoming', 'Event A'), ('in-progress', 'Active workshop'),
+                         ('ended', 'Past workshop'), ('draft', 'Draft workshop'),
+                         ('cancelled', 'Cancelled workshop')]:
+        response = client.get('/admin', params={'status': state})
+        assert response.status_code == 200
+        assert title in response.text
+        assert sum(name in response.text for name in ['Event A', *(item[0] for item in states)]) == 1
+
+    filtered = client.get('/admin', params={'q': ' dRaFt ', 'status': 'draft', 'activity': 'true'})
+    assert 'Draft workshop' in filtered.text and 'Past workshop' not in filtered.text
+    assert '<details id="agent-activity" class="card mt-4 p-3" open>' in filtered.text
+    assert 'No events match your search.' in client.get('/admin', params={'q': '%'}).text
+    pending = client.get('/admin/hires', params={'status': 'pending'}).text
+    assert 'Pending request' in pending and 'Confirmed request' not in pending

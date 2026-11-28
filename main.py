@@ -16,8 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import Session, joinedload
 
 from agents import MessageBus
 from database import Base, engine, get_db, lock_row, SessionLocal
@@ -382,18 +382,43 @@ def checkin(request: Request,event_id: int=Form(...),code: str=Form(...),
 
 @app.get('/admin')
 def admin(request: Request, db: Session=Depends(get_db), note: str='',
-          conversation_id: str='', before: int | None=None):
-    require_role(request,db,'admin')
-    events=db.scalars(select(Event).order_by(Event.id.desc())).all()
-    stats=[]
-    for event in events:
-        bookings=db.scalars(select(Booking).where(Booking.event_id==event.id)).all()
-        tickets=db.scalars(select(Ticket).join(Booking).where(Booking.event_id==event.id)).all()
-        stats.append({'event':event,
-                      'sold':sum(b.quantity for b in bookings if b.status=='paid'),
-                      'revenue':sum(b.total-b.refund_amount for b in bookings),
-                      'checkins':sum(1 for t in tickets if t.status=='checked_in'),
-                      'capacity':event.venue.capacity})
+          conversation_id: str='', before: int | None=None, q: str='', status: str='',
+          activity: bool=False):
+    require_role(request, db, 'admin')
+    instant = now_utc()
+    event_status = case(
+        (Event.status == 'draft', 'draft'),
+        (Event.status == 'cancelled', 'cancelled'),
+        (Event.end_at < instant, 'ended'),
+        (Event.start_at <= instant, 'in-progress'),
+        else_='upcoming',
+    )
+    sold = case((Booking.status == 'paid', Booking.quantity), else_=0)
+    sales = select(
+        Booking.event_id,
+        func.sum(sold).label('sold'),
+        func.sum(Booking.total - Booking.refund_amount).label('revenue'),
+    ).group_by(Booking.event_id).subquery()
+    attendance = select(
+        Booking.event_id, func.count(Ticket.id).label('checkins'),
+    ).join(Ticket).where(Ticket.status == 'checked_in').group_by(Booking.event_id).subquery()
+    events = (
+        select(Event, event_status.label('status'), func.coalesce(sales.c.sold, 0).label('sold'),
+               func.coalesce(sales.c.revenue, 0).label('revenue'),
+               func.coalesce(attendance.c.checkins, 0).label('checkins'))
+        .options(joinedload(Event.venue))
+        .outerjoin(sales, sales.c.event_id == Event.id)
+        .outerjoin(attendance, attendance.c.event_id == Event.id)
+        .order_by(Event.start_at.desc(), Event.id.desc())
+    )
+    q = q.strip()
+    if q:
+        events = events.where(Event.title.icontains(q, autoescape=True))
+    if status:
+        events = events.where(event_status == status)
+    stats = [{'event': event, 'status': state, 'sold': sold_count, 'revenue': revenue, 'checkins': checkins}
+             for event, state, sold_count, revenue, checkins in db.execute(events)]
+    pending_hires = db.scalar(select(func.count()).select_from(HireRequest).where(HireRequest.status == 'pending'))
     log_query = select(AgentMessage)
     if conversation_id:
         log_query = log_query.where(AgentMessage.conversation_id == conversation_id)
@@ -403,7 +428,9 @@ def admin(request: Request, db: Session=Depends(get_db), note: str='',
     older_than = messages[119].id if len(messages) > 120 else None
     states=db.scalars(select(AgentState).order_by(AgentState.agent,AgentState.key).limit(100)).all()
     return page(request, 'admin.html', db, stats=stats, messages=messages[:120], states=states,
-                note=note, conversation_id=conversation_id, before=before, older_than=older_than)
+                note=note, conversation_id=conversation_id, before=before, older_than=older_than,
+                q=q, status=status, pending_hires=pending_hires,
+                show_activity=activity or bool(conversation_id) or before is not None)
 
 
 @app.get('/admin/venues')
@@ -535,10 +562,12 @@ def event_cancel(event_id: int,request: Request,csrf: str=Form(...),db: Session=
 
 
 @app.get('/admin/hires')
-def admin_hires(request: Request,db: Session=Depends(get_db)):
+def admin_hires(request: Request, db: Session=Depends(get_db), status: str=''):
     require_role(request,db,'admin')
-    hires=db.scalars(select(HireRequest).order_by(HireRequest.id.desc())).all()
-    return page(request,'admin_hires.html',db,hires=hires)
+    query = select(HireRequest).order_by(HireRequest.id.desc())
+    if status == 'pending':
+        query = query.where(HireRequest.status == 'pending')
+    return page(request, 'admin_hires.html', db, hires=db.scalars(query).all(), pending_only=status == 'pending')
 
 
 @app.post('/admin/hires/{hire_id}/{decision}')

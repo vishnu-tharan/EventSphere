@@ -153,6 +153,11 @@ a, button, input, select, textarea { scroll-margin-block: 1rem; }
 .table-responsive { border: 1px solid var(--border); border-radius: .6rem; }
 .table-responsive .table { margin-bottom: 0; }
 .log-table pre { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 12rem; max-width: 30rem; }
+.admin-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+.admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.admin-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 44px; }
+.admin-event-name { min-width: 9rem; overflow-wrap: anywhere; }
+#agent-activity > summary { cursor: pointer; color: var(--maroon); }
 .code-small { overflow-wrap: anywhere; font-size: .8rem; }
 .ticket-image { max-width: 170px; }
 .ticket-image img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: .45rem; background: white; }
@@ -169,5 +174,8 @@ a, button, input, select, textarea { scroll-margin-block: 1rem; }
   .hero-actions > *, .event-card .btn { width: 100%; }
   .event-search { grid-template-columns: minmax(0, 1fr) auto; }
   .event-search > :first-child { grid-column: 1 / -1; }
+  .admin-search { grid-template-columns: minmax(0, 1fr); }
+  .admin-actions { width: 100%; }
+  .admin-actions .btn { flex: 1 0 auto; }
   .event-card .btn { display: grid; place-items: center; }
 }
