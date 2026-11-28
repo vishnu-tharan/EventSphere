@@ -650,6 +650,74 @@ def event_publish(event_id: int,request: Request,csrf: str=Form(...),db: Session
     return back('/admin','Event published')
 
 
+def schedule_version(event: Event) -> str:
+    return f'{event.venue_id}/{event.start_at.isoformat()}/{event.end_at.isoformat()}'
+
+
+@app.api_route('/admin/events/{event_id}/schedule', methods=['GET', 'POST'], include_in_schema=False)
+def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db), note: str='',
+                   csrf: str=Form(''), venue_id: int=Form(0), start_at: str=Form(''),
+                   end_at: str=Form(''), version: str=Form('')):
+    require_role(request, db, 'admin')
+    saving = request.method == 'POST'
+    if saving:
+        check_csrf(request, csrf)
+    event = lock_row(db, Event, event_id) if saving else db.get(Event, event_id)
+    if event is None or event.status != 'published':
+        raise HTTPException(404, 'Published event not found')
+    instant = now_utc()
+    has_checkins = db.scalar(select(Ticket.id).join(Ticket.booking).where(
+        Booking.event_id == event.id, Ticket.status == 'checked_in').limit(1))
+    if event.start_at <= instant or has_checkins is not None:
+        return back('/admin', 'Schedule changes close when the event starts or the first ticket is checked in.')
+    current_version = schedule_version(event)
+    if not saving:
+        venues = db.scalars(select(Venue).order_by(Venue.name, Venue.id)).all()
+        return page(request, 'event_schedule.html', db, event=event, venues=venues,
+                    version=current_version, note=note)
+
+    form_url = f'/admin/events/{event.id}/schedule'
+    if version != current_version:
+        return back(form_url, 'The schedule changed while you were editing. Review the latest details.')
+    starts = event.start_at if start_at == for_input(event.start_at) else to_utc(start_at)
+    ends = event.end_at if end_at == for_input(event.end_at) else to_utc(end_at)
+    if (venue_id, starts, ends) == (event.venue_id, event.start_at, event.end_at):
+        return back('/admin', 'The event schedule is already up to date.')
+    if starts <= instant or ends <= starts:
+        return back(form_url, 'Choose a future start time and a later end time.')
+    hold_until = db.scalar(select(func.max(WaitlistEntry.expires_at)).join(WaitlistEntry.category).where(
+        TicketCategory.event_id == event.id, WaitlistEntry.status == 'offered'))
+    if hold_until and starts <= hold_until:
+        return back(form_url, 'Choose a start time after the current ticket holds expire.')
+
+    bus = MessageBus(db)
+    decision = bus.send('Admin', 'VenueAgent', 'REQUEST', {
+        'action': 'check_event', 'event_id': event.id, 'venue_id': venue_id,
+        'start_at': starts.isoformat(), 'end_at': ends.isoformat(),
+        'ticket_quantity': sum(ticket.quantity for ticket in event.ticket_categories),
+    })
+    if decision['performative'] != 'AGREE':
+        db.commit()
+        return back(form_url, decision['content'].get('reason', 'Venue unavailable'))
+    if min(event.start_at, starts) <= now_utc():
+        return back('/admin', 'The event start time has arrived. Its schedule can no longer be changed.')
+
+    venue = db.get(Venue, venue_id)
+    old_schedule = f'{event.venue.name}, {event.venue.location} from {as_local(event.start_at)} to {as_local(event.end_at)}'
+    new_schedule = f'{venue.name}, {venue.location} from {as_local(starts)} to {as_local(ends)}'
+    event.venue = venue
+    event.start_at, event.end_at = starts, ends
+    recipients = db.scalars(select(Booking.user_id).where(
+        Booking.event_id == event.id, Booking.status == 'paid').distinct()).all()
+    for user_id in recipients:
+        bus.send('Admin', 'ALL', 'INFORM', {
+            'user_id': user_id,
+            'text': f'{event.title} schedule changed. Previous: {old_schedule}. New: {new_schedule}. Times are in Sri Lanka.',
+        })
+    db.commit()
+    return back('/admin', f'Event schedule updated. {len(recipients)} attendee(s) notified.')
+
+
 @app.post('/admin/events/{event_id}/cancel')
 def event_cancel(event_id: int,request: Request,csrf: str=Form(...),db: Session=Depends(get_db)):
     check_csrf(request,csrf)

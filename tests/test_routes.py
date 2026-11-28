@@ -9,7 +9,7 @@ from sqlalchemy import select
 from main import app, auth_signer, for_input
 from database import get_db
 from agents import MessageBus
-from models import AgentMessage, Booking, Event, HireRequest, TicketCategory, User, WaitlistEntry, now_utc
+from models import AgentMessage, Booking, Event, HireRequest, Notification, TicketCategory, User, WaitlistEntry, now_utc
 
 
 def test_admin_and_scanner_refuse_wrong_roles(setup_db):
@@ -469,3 +469,49 @@ def test_calendar_download_uses_booked_event_details_and_utc(upcoming_booking):
     db.commit()
     assert path not in client.get('/bookings').text
     assert client.get(path).status_code == 404
+
+
+def test_published_schedule_checks_conflicts_and_notifies_each_attendee_once(upcoming_booking):
+    db, client, booking = upcoming_booking
+    event = booking.event
+    start = event.start_at + timedelta(hours=3)
+    end = event.end_at + timedelta(hours=3)
+    other = Event(title='Room already booked', category='Workshop', venue_id=2,
+                  start_at=start, end_at=end, status='published')
+    db.add(other)
+    bus = MessageBus(db)
+    assert bus.send('Website', 'BookingAgent', 'REQUEST', {
+        'action': 'book', 'user_id': 1, 'category_id': 1, 'quantity': 1,
+    })['performative'] == 'AGREE'
+    db.commit()
+
+    path = f'/admin/events/{event.id}/schedule'
+    client.cookies.set('session', auth_signer.dumps('1'))
+    assert client.get(path).status_code == 403
+    client.cookies.set('session', auth_signer.dumps('3'))
+    assert path in client.get('/admin').text
+    page = client.get(path).text
+    form = {
+        'csrf': re.search(r'name="csrf" value="([^"]+)"', page)[1],
+        'version': re.search(r'name="version" value="([^"]+)"', page)[1],
+        'venue_id': 2, 'start_at': for_input(start), 'end_at': for_input(end),
+    }
+    assert 'conflicting activity' in client.post(path, data=form).text
+    assert event.venue_id == 1
+
+    other.status = 'cancelled'
+    db.commit()
+    updated = client.post(path, data=form)
+    assert '1 attendee(s) notified' in updated.text
+    assert event.venue_id == 2 and event.status == 'published'
+    assert event.start_at == start.replace(second=0, microsecond=0)
+    assert booking.status == 'paid'
+    notices = db.scalars(select(Notification).where(Notification.message.contains('schedule changed'))).all()
+    assert len(notices) == 1 and notices[0].user_id == 1
+    assert 'Previous: Hall' in notices[0].message and 'New: Room' in notices[0].message
+    assert 'schedule changed while you were editing' in client.post(path, data=form).text
+
+    booking.tickets[0].status = 'checked_in'
+    db.commit()
+    assert 'Schedule changes close' in client.post(path, data=form).text
+    assert path not in client.get('/admin').text

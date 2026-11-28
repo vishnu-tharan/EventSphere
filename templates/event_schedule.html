@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}Update event schedule{% endblock %}
+{% block content %}
+<a href="/admin" class="small">Back to dashboard</a>
+<h1 class="h2 mt-2">Update event schedule</h1>
+<p class="text-secondary">{{event.title}}. Attendees with confirmed bookings will receive the new details.</p>
+<form class="card event-editor p-3 p-md-4" method="post" action="/admin/events/{{event.id}}/schedule">
+  <input type="hidden" name="csrf" value="{{csrf}}">
+  <input type="hidden" name="version" value="{{version}}">
+  <label class="form-label" for="schedule-venue">Venue</label>
+  <select class="form-select mb-3" id="schedule-venue" name="venue_id" required>
+    {% for venue in venues %}
+    <option value="{{venue.id}}"{% if venue.id == event.venue_id %} selected{% endif %}>{{venue.name}} (capacity {{venue.capacity}})</option>
+    {% endfor %}
+  </select>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="schedule-start">Start time (Sri Lanka)</label>
+      <input class="form-control" type="datetime-local" id="schedule-start" name="start_at" value="{{for_input(event.start_at)}}" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="schedule-end">End time (Sri Lanka)</label>
+      <input class="form-control" type="datetime-local" id="schedule-end" name="end_at" value="{{for_input(event.end_at)}}" required>
+    </div>
+  </div>
+  <div class="mt-3"><button class="btn btn-dark">Update schedule and notify attendees</button></div>
+</form>
+{% endblock %}
