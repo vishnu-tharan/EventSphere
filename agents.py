@@ -110,26 +110,27 @@ def save_state(db: Session, agent: str, key: str, value):
     db.flush()
 
 
+def venue_busy_periods(venue_id, after, before=None, exclude_event=None):
+    """Return the published activities and reserved hires that occupy the venue."""
+    events = select(Event.start_at, Event.end_at).where(
+        Event.venue_id == venue_id, Event.status == 'published', Event.end_at > after)
+    hires = select(HireRequest.start_at, HireRequest.end_at).where(
+        HireRequest.venue_id == venue_id, HireRequest.status.in_(['confirmed', 'pending']),
+        HireRequest.end_at > after)
+    if before is not None:
+        events = events.where(Event.start_at < before)
+        hires = hires.where(HireRequest.start_at < before)
+    if exclude_event is not None:
+        events = events.where(Event.id != exclude_event)
+    return events.union_all(hires)
+
+
 class VenueAgent:
     """Goal: prevent venue clashes, calculate and decide whole-venue hire."""
     def _clashes(self, db, venue_id, start, end, exclude_event=None):
-        buffered_start = start - timedelta(minutes=BUFFER_MINUTES)
-        buffered_end = end + timedelta(minutes=BUFFER_MINUTES)
-        stmt = select(Event.id).where(
-            Event.venue_id == venue_id, Event.status == 'published',
-            Event.start_at < buffered_end, Event.end_at > buffered_start,
-        )
-        if exclude_event:
-            stmt = stmt.where(Event.id != exclude_event)
-        if db.scalar(stmt.limit(1)) is not None:
-            return True
-        hires = select(HireRequest.id).where(
-            HireRequest.venue_id == venue_id,
-            HireRequest.status.in_(['confirmed', 'pending']),
-            HireRequest.start_at < buffered_end,
-            HireRequest.end_at > buffered_start,
-        )
-        return db.scalar(hires.limit(1)) is not None
+        buffer = timedelta(minutes=BUFFER_MINUTES)
+        occupied = venue_busy_periods(venue_id, start - buffer, end + buffer, exclude_event)
+        return db.execute(occupied.limit(1)).first() is not None
 
     def _alternatives(self, db, venue, start, end, guest_count, *, for_hire=False,
                       exclude_event=None):
@@ -140,15 +141,9 @@ class VenueAgent:
             eligible = eligible.where(Venue.hire_open.is_(True))
         options = []
         for room in db.scalars(eligible.order_by(Venue.id)):
-            events = select(Event.start_at, Event.end_at).where(
-                Event.venue_id == room.id, Event.status == 'published', Event.end_at > start - buffer)
-            hires = select(HireRequest.start_at, HireRequest.end_at).where(
-                HireRequest.venue_id == room.id, HireRequest.status.in_(['confirmed', 'pending']),
-                HireRequest.end_at > start - buffer)
-            if exclude_event is not None:
-                events = events.where(Event.id != exclude_event)
+            occupied = venue_busy_periods(room.id, start - buffer, exclude_event=exclude_event)
             proposed_start = start
-            for busy_start, busy_end in db.execute(events.union_all(hires).order_by('start_at')):
+            for busy_start, busy_end in db.execute(occupied.order_by('start_at')):
                 if proposed_start + duration + buffer <= busy_start:
                     break
                 proposed_start = max(proposed_start, busy_end + buffer)

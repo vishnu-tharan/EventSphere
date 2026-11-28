@@ -6,7 +6,7 @@ from datetime import timedelta
 import re
 import pytest
 from sqlalchemy import select
-from main import app, auth_signer, for_input
+from main import app, auth_signer, for_input, to_utc
 from database import get_db
 from agents import MessageBus
 from models import AgentMessage, Booking, Event, HireRequest, Notification, TicketCategory, User, WaitlistEntry, now_utc
@@ -544,3 +544,24 @@ def test_leaving_waitlist_releases_hold_once_and_offers_it_to_next_attendee(upco
     assert 'You left the waitlist' in client.post(f'/waitlist/{queued.id}/leave', data={'csrf': csrf}).text
     db.expire_all()
     assert queued.status == 'withdrawn' and booking.category.remaining == 1
+
+
+def test_venue_availability_merges_buffers_without_showing_booking_details(upcoming_booking):
+    db, client, booking = upcoming_booking
+    day = (now_utc().date() + timedelta(days=4)).isoformat()
+    db.add(Event(title='Hidden event name', category='Workshop', venue_id=1,
+                 start_at=to_utc(day + 'T09:00'), end_at=to_utc(day + 'T10:00'),
+                 status='published'))
+    for state, start, end in [('pending', '10:45', '11:00'), ('rejected', '13:00', '14:00')]:
+        db.add(HireRequest(user_id=2, venue_id=1, start_at=to_utc(f'{day}T{start}'),
+                           end_at=to_utc(f'{day}T{end}'), purpose=f'Private {state} purpose',
+                           guest_count=10, status=state))
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('1'))
+    response = client.get('/hire/availability', params={'venue_id': 1, 'day': day})
+    assert response.status_code == 200
+    assert response.text.count('>Busy</span>') == 1 and response.text.count('>Available</span>') == 2
+    assert '08:30 AM' in response.text and '11:30 AM' in response.text
+    assert 'Hidden event name' not in response.text and 'Private pending purpose' not in response.text
+    assert '01:00 PM' not in response.text
+    assert client.get('/hire/availability', params={'venue_id': 99, 'day': day}).status_code == 404

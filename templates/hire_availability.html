@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Venue availability{% endblock %}
+{% block content %}
+<a href="/hire" class="small">Back to venue hire</a>
+<h1 class="h2 mt-2">Venue availability</h1>
+{% if venues %}
+<form method="get" action="/hire/availability" class="event-search admin-search" aria-label="Check venue availability">
+  <div>
+    <label class="form-label" for="availability-venue">Venue</label>
+    <select class="form-select" id="availability-venue" name="venue_id" required>
+      {% for room in venues %}<option value="{{room.id}}"{% if venue.id == room.id %} selected{% endif %}>{{room.name}}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="form-label" for="availability-day">Date (Sri Lanka)</label>
+    <input class="form-control" id="availability-day" name="day" type="date" value="{{day.isoformat()}}" min="{{today.isoformat()}}" required>
+  </div>
+  <button class="btn btn-dark">Show times</button>
+</form>
+{% if slots %}
+<h2 class="h4 mt-4">{{venue.name}}</h2>
+<p class="text-secondary">Busy periods include a {{buffer_minutes}}-minute buffer before and after each booking. Availability is checked again when you request a venue.</p>
+<ul class="list-group mb-3">
+  {% for start, end, status in slots %}
+  <li class="list-group-item d-flex flex-wrap align-items-center gap-2 justify-content-between">
+    <span>{{fmt(start)}} to {{fmt(end)}}</span>
+    <span class="badge rounded-pill text-bg-{{'success' if status == 'Available' else 'secondary'}}">{{status}}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% else %}
+<p>No venues are open for private hire.</p>
+{% endif %}
+{% endblock %}

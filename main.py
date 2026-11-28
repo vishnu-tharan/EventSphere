@@ -7,7 +7,7 @@ import math
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import qrcode
@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
 
-from agents import MessageBus
+from agents import BUFFER_MINUTES, MessageBus, venue_busy_periods
 from calendar_file import event_calendar
 from database import Base, engine, get_db, lock_row, SessionLocal
 from models import (AgentMessage, AgentState, Booking, Event, HireRequest, Notification,
@@ -360,6 +360,49 @@ def hire_page(request: Request,note: str='',db: Session=Depends(get_db)):
     hires=db.scalars(select(HireRequest).where(HireRequest.user_id==user.id)
                      .order_by(HireRequest.id.desc())).all()
     return page(request,'hire.html',db,venues=venues,hires=hires,note=note,json_loads=json.loads)
+
+
+@app.get('/hire/availability')
+def hire_availability(request: Request, venue_id: int | None=None, day: date | None=None,
+                      db: Session=Depends(get_db)):
+    if get_user(request, db) is None:
+        return back('/login?venue_request=1')
+    require_role(request, db, 'attendee')
+    venues = db.scalars(select(Venue).where(Venue.hire_open.is_(True)).order_by(Venue.name, Venue.id)).all()
+    venue = next((room for room in venues if room.id == venue_id), None) if venue_id is not None else (
+        venues[0] if venues else None)
+    if venue_id is not None and venue is None:
+        raise HTTPException(404, 'Venue not available for private hire')
+    instant = now_utc()
+    today = instant.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).date()
+    day = day or today
+    if day < today or day == date.max:
+        return page(request, 'hire_availability.html', db, venues=venues, venue=venue,
+                    day=day, today=today, slots=[], error='Choose today or a future date.')
+    slots = []
+    if venue is not None:
+        start = max(to_utc(datetime.combine(day, time.min).isoformat()), instant)
+        end = to_utc(datetime.combine(day + timedelta(days=1), time.min).isoformat())
+        buffer = timedelta(minutes=BUFFER_MINUTES)
+        occupied = venue_busy_periods(venue.id, start - buffer, end + buffer).order_by('start_at')
+        for busy_start, busy_end in db.execute(occupied):
+            busy_start = max(start, busy_start - buffer)
+            busy_end = min(end, busy_end + buffer)
+            if slots and busy_start <= slots[-1][1]:
+                slots[-1] = (slots[-1][0], max(slots[-1][1], busy_end), 'Busy')
+            else:
+                slots.append((busy_start, busy_end, 'Busy'))
+        timeline = []
+        for busy_start, busy_end, status in slots:
+            if start < busy_start:
+                timeline.append((start, busy_start, 'Available'))
+            timeline.append((busy_start, busy_end, status))
+            start = busy_end
+        if start < end:
+            timeline.append((start, end, 'Available'))
+        slots = timeline
+    return page(request, 'hire_availability.html', db, venues=venues, venue=venue, day=day,
+                today=today, slots=slots, buffer_minutes=BUFFER_MINUTES)
 
 
 @app.post('/hire')
