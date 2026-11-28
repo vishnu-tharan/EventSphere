@@ -337,6 +337,7 @@ def test_dashboard_filters_event_statuses_and_opens_pending_hires(upcoming_booki
     dashboard = client.get('/admin').text
     assert '1 of 2 tickets checked in' in dashboard
     assert 'text-bg-light">1</span>' in dashboard
+    assert 'View agent logs' in dashboard
     assert '<details id="agent-activity" class="card mt-4 p-3">' in dashboard
     for state, title in [('upcoming', 'Event A'), ('in-progress', 'Active workshop'),
                          ('ended', 'Past workshop'), ('draft', 'Draft workshop'),

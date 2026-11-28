@@ -92,7 +92,7 @@
 
 {% set activity_filters = 'activity=true&q=' ~ (q|urlencode) ~ '&status=' ~ (status|urlencode) %}
 <details id="agent-activity" class="card mt-4 p-3"{% if show_activity %} open{% endif %}>
-<summary class="fw-semibold">Agent activity</summary>
+<summary class="btn btn-outline-dark align-self-start">View agent logs</summary>
 <h2 class="h5 mt-3">Agent persistent beliefs / counters</h2>
 <div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Agent</th><th>State key</th><th>Saved JSON value</th></tr></thead><tbody>
 {% for state in states %}<tr><td>{{state.agent}}</td><td>{{state.key}}</td><td><code class="code-small">{{state.value_json}}</code></td></tr>{% else %}<tr><td colspan="3">Timer/counter state appears after sweeps or rejected scans; business states also persist in bookings, venues, tickets and waitlists.</td></tr>{% endfor %}

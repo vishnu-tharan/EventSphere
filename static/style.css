@@ -158,7 +158,8 @@ a, button, input, select, textarea { scroll-margin-block: 1rem; }
 .admin-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 44px; }
 .admin-event-name { min-width: 9rem; overflow-wrap: anywhere; }
 .event-editor { max-width: 790px; }
-#agent-activity > summary { cursor: pointer; color: var(--maroon); }
+#agent-activity > summary::after { content: " +"; }
+#agent-activity[open] > summary::after { content: " −"; }
 .code-small { overflow-wrap: anywhere; font-size: .8rem; }
 .ticket-image { max-width: 170px; }
 .ticket-image img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: .45rem; background: white; }
