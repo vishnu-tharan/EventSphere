@@ -9,7 +9,7 @@ from sqlalchemy import select
 from main import app, auth_signer, for_input, to_utc
 from database import get_db
 from agents import MessageBus
-from models import AgentMessage, Booking, Event, HireRequest, Notification, TicketCategory, User, WaitlistEntry, now_utc
+from models import AdminActivity, AgentMessage, Booking, Event, HireRequest, Notification, TicketCategory, User, WaitlistEntry, now_utc
 
 
 def test_admin_and_scanner_refuse_wrong_roles(setup_db):
@@ -518,6 +518,9 @@ def test_published_schedule_checks_conflicts_and_notifies_each_attendee_once(upc
     db.commit()
     assert 'Schedule changes close' in client.post(path, data=form).text
     assert path not in client.get(manage_path).text
+    history = client.get('/admin/activity').text
+    assert history.count('Updated event schedule') == 1
+    assert 'By Admin' in history and 'Previous: Hall' in history and 'New: Room' in history
 
 
 def test_leaving_waitlist_releases_hold_once_and_offers_it_to_next_attendee(upcoming_booking):
@@ -612,3 +615,30 @@ def test_manage_event_limits_search_and_stats_to_selected_event(upcoming_booking
     filtered = client.get(url, params={'q': f'#{booking.id}'}).text
     assert booking.payment_ref in filtered and other_booking.payment_ref not in filtered
     assert 'No bookings match' in client.get(url, params={'q': unrelated_ref}).text
+
+
+def test_admin_activity_records_hire_decisions_and_event_cancellation(upcoming_booking):
+    db, client, booking = upcoming_booking
+    start = booking.event.end_at + timedelta(days=1)
+    hires = [HireRequest(user_id=1, venue_id=2, start_at=start, end_at=start+timedelta(hours=1),
+                         purpose='Venue request', guest_count=30, status='pending') for _ in range(2)]
+    db.add_all(hires)
+    db.commit()
+    client.cookies.set('session', auth_signer.dumps('1'))
+    history_path = '/admin/activity'
+    assert client.get(history_path).status_code == 403
+    client.cookies.set('session', auth_signer.dumps('3'))
+    history = client.get(history_path)
+    assert 'No admin actions' in history.text
+    csrf = re.search(r'name="csrf" value="([^"]+)"', history.text)[1]
+    for hire, decision in zip(hires, ('approve', 'reject')):
+        assert client.post(f'/admin/hires/{hire.id}/{decision}', data={'csrf': csrf}).status_code == 200
+    manage = f'/admin/events/{booking.event_id}/manage'
+    cancelled = client.post(f'/admin/events/{booking.event_id}/cancel',
+                            data={'csrf': csrf, 'from_manage': 'true'})
+    assert cancelled.url.path == manage and 'full refunds: 1' in cancelled.text
+    assert 'Cancel this event' not in cancelled.text
+    records = db.scalars(select(AdminActivity).order_by(AdminActivity.id)).all()
+    assert [row.action for row in records] == ['Approved venue hire', 'Rejected venue hire', 'Cancelled event']
+    assert all(row.admin_id == 3 and row.created_at for row in records)
+    assert 'Simulated refunds issued: 1.' in client.get(history_path).text

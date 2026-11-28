@@ -138,3 +138,13 @@ class AgentState(Base):
     key: Mapped[str] = mapped_column(String(120))
     value_json: Mapped[str] = mapped_column(Text, default='{}')
     __table_args__ = (UniqueConstraint('agent', 'key'),)
+
+
+class AdminActivity(Base):
+    __tablename__ = 'admin_activity'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    admin_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    action: Mapped[str] = mapped_column(String(80))
+    details: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
+    admin: Mapped['User'] = relationship()

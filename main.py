@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 from agents import BUFFER_MINUTES, MessageBus, venue_busy_periods
 from calendar_file import event_calendar
 from database import Base, engine, get_db, lock_row, SessionLocal
-from models import (AgentMessage, AgentState, Booking, Event, HireRequest, Notification,
+from models import (AdminActivity, AgentMessage, AgentState, Booking, Event, HireRequest, Notification,
                     Ticket, TicketCategory, User, Venue, WaitlistEntry, now_utc)
 from security import hash_password, verify_password
 
@@ -528,6 +528,19 @@ def admin(request: Request, db: Session=Depends(get_db), note: str='',
                 show_activity=activity or bool(conversation_id) or before is not None)
 
 
+@app.get('/admin/activity')
+def admin_activity(request: Request, db: Session=Depends(get_db), before: int | None=None):
+    require_role(request, db, 'admin')
+    query = select(AdminActivity).options(joinedload(AdminActivity.admin))
+    if before is not None:
+        query = query.where(AdminActivity.id < before)
+    entries = db.scalars(query.order_by(AdminActivity.id.desc()).limit(31)).all()
+    response = page(request, 'admin_activity.html', db, entries=entries[:30], before=before,
+                    older_than=entries[29].id if len(entries) > 30 else None)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
 @app.get('/admin/events/{event_id}/manage')
 def manage_event(event_id: int, request: Request, db: Session=Depends(get_db), q: str='',
                  before: int | None=None, note: str=''):
@@ -792,7 +805,7 @@ def schedule_version(event: Event) -> str:
 def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db), note: str='',
                    csrf: str=Form(''), venue_id: int=Form(0), start_at: str=Form(''),
                    end_at: str=Form(''), version: str=Form('')):
-    require_role(request, db, 'admin')
+    admin_user = require_role(request, db, 'admin')
     saving = request.method == 'POST'
     if saving:
         check_csrf(request, csrf)
@@ -849,6 +862,8 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
             'user_id': user_id,
             'text': f'{event.title} schedule changed. Previous: {old_schedule}. New: {new_schedule}. Times are in Sri Lanka.',
         })
+    db.add(AdminActivity(admin_id=admin_user.id, action='Updated event schedule',
+                         details=f'{event.title} (event #{event.id}). Previous: {old_schedule}. New: {new_schedule}.'))
     db.commit()
     return back(manage_url, f'Event schedule updated. {len(recipients)} attendee(s) notified.')
 
@@ -857,7 +872,7 @@ def event_schedule(event_id: int, request: Request, db: Session=Depends(get_db),
 def event_cancel(event_id: int, request: Request, csrf: str=Form(...), db: Session=Depends(get_db),
                  from_manage: bool=Form(False)):
     check_csrf(request,csrf)
-    require_role(request,db,'admin')
+    admin_user = require_role(request,db,'admin')
     event=lock_row(db, Event, event_id)
     if not event or event.status!='published':raise HTTPException(400,'Published event not found')
     if now_utc() > event.end_at:
@@ -866,6 +881,8 @@ def event_cancel(event_id: int, request: Request, csrf: str=Form(...), db: Sessi
     answer=MessageBus(db).send('Admin','BookingAgent','REQUEST',
                                {'action':'event_cancelled','event_id':event_id})
     refunds = answer['content']['refunded_bookings']
+    db.add(AdminActivity(admin_id=admin_user.id, action='Cancelled event',
+                         details=f'{event.title} (event #{event.id}). Simulated refunds issued: {refunds}.'))
     db.commit()
     target = f'/admin/events/{event.id}/manage' if from_manage else '/admin'
     return back(target, f'Event cancelled; full refunds: {refunds}')
@@ -884,12 +901,15 @@ def admin_hires(request: Request, db: Session=Depends(get_db), status: str=''):
 def decide_hire(hire_id: int,decision: str,request: Request,csrf: str=Form(...),
                 db: Session=Depends(get_db)):
     check_csrf(request,csrf)
-    require_role(request,db,'admin')
+    admin_user = require_role(request,db,'admin')
     hire=lock_row(db, HireRequest, hire_id)
     if not hire or hire.status!='pending' or decision not in ('approve','reject'):
         raise HTTPException(400,'Invalid pending request/decision')
     hire.status='confirmed' if decision=='approve' else 'rejected'
     MessageBus(db).send('Admin','ALL','INFORM',{
         'user_id':hire.user_id,'text':f'Private hire #{hire.id} {hire.status} by admin.'})
+    action = 'Approved venue hire' if decision == 'approve' else 'Rejected venue hire'
+    db.add(AdminActivity(admin_id=admin_user.id, action=action,
+                         details=f'Hire #{hire.id} at {hire.venue.name} on {as_local(hire.start_at)}.'))
     db.commit()
     return back('/admin/hires')

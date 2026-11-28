@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Admin activity history{% endblock %}
+{% block content %}
+<a href="/admin" class="small">Back to dashboard</a>
+<h1 class="h2 mt-2">Admin activity history</h1>
+<div class="d-grid gap-2 mt-3">
+  {% for entry in entries %}
+  <article class="card p-3">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+      <h2 class="h5 mb-0">{{entry.action}}</h2>
+      <span class="small text-secondary">{{fmt(entry.created_at)}} (Sri Lanka)</span>
+    </div>
+    <p class="small my-2">By {{entry.admin.name}}</p>
+    <p class="mb-0">{{entry.details}}</p>
+  </article>
+  {% else %}
+  <p class="text-secondary">No admin actions to show yet.</p>
+  {% endfor %}
+</div>
+<nav class="d-flex flex-wrap gap-2 mt-3" aria-label="Admin activity pages">
+  {% if before is not none %}<a class="btn btn-outline-dark" href="/admin/activity">Newest actions</a>{% endif %}
+  {% if older_than is not none %}<a class="btn btn-outline-dark" href="/admin/activity?before={{older_than}}">Older actions</a>{% endif %}
+</nav>
+{% endblock %}
